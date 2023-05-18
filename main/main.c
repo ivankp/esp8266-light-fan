@@ -42,6 +42,9 @@ esp_err_t connect_get_handler(httpd_req_t* req) {
   return ESP_OK;
 }
 
+void stop_access_point(void);
+void start_thermostat(void);
+
 esp_err_t connect_post_handler(httpd_req_t* req) {
   char buf[sizeof(wifi_ssid)+sizeof(wifi_pass)];
   int remaining = req->content_len;
@@ -100,6 +103,9 @@ bad_pass:
 
   httpd_resp_send(req, resp, resp_len);
 
+  stop_access_point();
+  start_thermostat();
+
   return ESP_OK;
 }
 
@@ -117,7 +123,7 @@ httpd_uri_t connect_post = {
   .user_ctx  = NULL
 };
 
-void start_webserver(void) {
+void start_access_point(void) {
   server = NULL;
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
 
@@ -128,6 +134,13 @@ void start_webserver(void) {
   } else {
     server = NULL;
   }
+}
+
+void stop_access_point(void) {
+  sleep(5);
+}
+
+void start_thermostat(void) {
 }
 
 /* static void wifi_event_handler( */
@@ -189,11 +202,11 @@ void app_main() {
   ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_AP, &wifi_config));
   ESP_ERROR_CHECK(esp_wifi_start());
 
-  puts(
-    "SSID: " SSID "\n"
-    "PASS: " PASS
-  );
+  /* puts( */
+  /*   "SSID: " SSID "\n" */
+  /*   "PASS: " PASS */
+  /* ); */
 
   // ----------------------------------------------------------------
-  start_webserver();
+  start_access_point();
 }
