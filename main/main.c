@@ -15,6 +15,9 @@
 #include "lwip/err.h"
 #include "lwip/sys.h"
 
+#define STR1(x) #x
+#define STR(x) STR1(x)
+
 #define SSID      "esp-thermostat"
 #define PASS      "thermostat"
 #define MAX_CONN   8
@@ -27,7 +30,9 @@ static httpd_handle_t server = NULL;
 extern const uint8_t connect_html[] asm("_binary_connect_html_start");
 extern const uint8_t connect_html_end[] asm("_binary_connect_html_end");
 
-char wifi_ssid[65], wifi_pass[65];
+#define MAX_SSID_LEN 32
+#define MAX_PASS_LEN 64
+char wifi_ssid[MAX_SSID_LEN+1], wifi_pass[MAX_PASS_LEN+1];
 
 esp_err_t connect_get_handler(httpd_req_t* req) {
   const char* resp = (const char*) connect_html;
@@ -42,8 +47,8 @@ esp_err_t connect_post_handler(httpd_req_t* req) {
   int remaining = req->content_len;
   char *p = buf;
 
-  // if (remaining > sizeof(buf))
-  //   return ESP_FAIL;
+  if (remaining > sizeof(buf))
+    return ESP_FAIL;
 
   while (remaining > 0) {
     const int ret = httpd_req_recv(req, p, remaining);
@@ -59,15 +64,32 @@ esp_err_t connect_post_handler(httpd_req_t* req) {
 
   char *a = buf;
   char *b = memchr(a,'\0',sizeof(wifi_ssid));
-  if (!b) return ESP_FAIL;
+  if (!b) goto bad_ssid;
   ++b;
   const size_t ssid_len = b-a;
+  if (ssid_len < 3 || sizeof(wifi_ssid) < ssid_len) {
+bad_ssid:
+#define RESPONSE "SSID must be 2 to " STR(MAX_SSID_LEN) " bytes long"
+    httpd_resp_set_status(req, "400 Bad Request");
+    httpd_resp_send(req, RESPONSE, sizeof(RESPONSE));
+#undef RESPONSE
+    return ESP_OK;
+  }
   memcpy(wifi_ssid,a,ssid_len);
 
   a = b;
   b = memchr(a,'\0',sizeof(wifi_pass));
-  if (!b) return ESP_FAIL;
+  if (!b) goto bad_pass;
   ++b;
+  const size_t pass_len = b-a;
+  if (sizeof(wifi_pass) < pass_len) {
+bad_pass:
+#define RESPONSE "Password must be at most " STR(MAX_PASS_LEN) " bytes long"
+    httpd_resp_set_status(req, "400 Bad Request");
+    httpd_resp_send(req, RESPONSE, sizeof(RESPONSE));
+#undef RESPONSE
+    return ESP_OK;
+  }
   memcpy(wifi_pass,a,b-a);
 
 #define RESPONSE "Connecting to "
