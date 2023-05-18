@@ -15,16 +15,19 @@
 #include "lwip/err.h"
 #include "lwip/sys.h"
 
-#define SSID      "esp-ap"
-#define PASS      "engineer"
+#define SSID      "esp-thermostat"
+#define PASS      "thermostat"
 #define MAX_CONN   8
 
 // default IP address: 192.168.4.1
 
 static httpd_handle_t server = NULL;
 
+// embed static files
 extern const uint8_t connect_html[] asm("_binary_connect_html_start");
 extern const uint8_t connect_html_end[] asm("_binary_connect_html_end");
+
+char wifi_ssid[65], wifi_pass[65];
 
 esp_err_t connect_get_handler(httpd_req_t* req) {
   const char* resp = (const char*) connect_html;
@@ -34,20 +37,13 @@ esp_err_t connect_get_handler(httpd_req_t* req) {
   return ESP_OK;
 }
 
-httpd_uri_t connect_get = {
-  .uri       = "/",
-  .method    = HTTP_GET,
-  .handler   = connect_get_handler,
-  .user_ctx  = NULL
-};
-
 esp_err_t connect_post_handler(httpd_req_t* req) {
-  char buf[256];
+  char buf[sizeof(wifi_ssid)+sizeof(wifi_pass)];
   int remaining = req->content_len;
   char *p = buf;
 
-  if (remaining > sizeof(buf))
-    return ESP_FAIL;
+  // if (remaining > sizeof(buf))
+  //   return ESP_FAIL;
 
   while (remaining > 0) {
     const int ret = httpd_req_recv(req, p, remaining);
@@ -61,15 +57,36 @@ esp_err_t connect_post_handler(httpd_req_t* req) {
     remaining -= ret;
   }
 
-  char text[64] = "Connecting to ";
-  const size_t text_len = strlen(text);
-  const size_t ssid_len = strlen(buf);
-  memcpy(text+text_len,buf,ssid_len);
+  char *a = buf;
+  char *b = memchr(a,'\0',sizeof(wifi_ssid));
+  if (!b) return ESP_FAIL;
+  ++b;
+  const size_t ssid_len = b-a;
+  memcpy(wifi_ssid,a,ssid_len);
 
-  httpd_resp_send(req, text, text_len+ssid_len);
+  a = b;
+  b = memchr(a,'\0',sizeof(wifi_pass));
+  if (!b) return ESP_FAIL;
+  ++b;
+  memcpy(wifi_pass,a,b-a);
+
+#define RESPONSE "Connecting to "
+  char resp[sizeof(RESPONSE)-1+sizeof(wifi_ssid)] = RESPONSE;
+  const size_t resp_len = sizeof(RESPONSE)-1 + ssid_len;
+  memcpy(resp+sizeof(RESPONSE)-1,wifi_ssid,ssid_len);
+#undef RESPONSE
+
+  httpd_resp_send(req, resp, resp_len);
 
   return ESP_OK;
 }
+
+httpd_uri_t connect_get = {
+  .uri       = "/",
+  .method    = HTTP_GET,
+  .handler   = connect_get_handler,
+  .user_ctx  = NULL
+};
 
 httpd_uri_t connect_post = {
   .uri       = "/",
