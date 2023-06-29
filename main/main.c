@@ -2,12 +2,15 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/event_groups.h"
 
 #include "esp_system.h"
 #include "esp_wifi.h"
 #include "esp_netif.h"
 #include "esp_event.h"
 #include "esp_http_server.h"
+
+#include "esp_log.h"
 
 #include "nvs.h"
 #include "nvs_flash.h"
@@ -18,9 +21,14 @@
 #define STR1(x) #x
 #define STR(x) STR1(x)
 
+/* #define FIELD_SIZE(t,f) (sizeof(((t*)0)->f)) */
+
 #define SSID      "esp-thermostat"
 #define PASS      "thermostat"
 #define MAX_CONN   8
+
+#define WIFI_CONNECTED_BIT BIT0
+#define WIFI_FAIL_BIT      BIT1
 
 // default IP address: 192.168.4.1
 
@@ -30,9 +38,17 @@ static httpd_handle_t server = NULL;
 extern const uint8_t connect_html[] asm("_binary_connect_html_start");
 extern const uint8_t connect_html_end[] asm("_binary_connect_html_end");
 
-#define MAX_SSID_LEN 32
-#define MAX_PASS_LEN 64
-char wifi_ssid[MAX_SSID_LEN+1], wifi_pass[MAX_PASS_LEN+1];
+// ESP8266_RTOS_SDK/components/esp8266/include/esp_wifi_types.h
+#define MAX_SSID_STRLEN 31
+#define MAX_PASS_STRLEN 63
+char
+  wifi_ssid[MAX_SSID_STRLEN+1],
+  wifi_pass[MAX_PASS_STRLEN+1];
+
+// static_assert( sizeof(SSID) <= FIELD_SIZE(wifi_config_t,ap.ssid) );
+// static_assert( sizeof(PASS) <= FIELD_SIZE(wifi_config_t,ap.password) );
+// static_assert( sizeof(wifi_ssid) == FIELD_SIZE(wifi_config_t,sta.ssid) );
+// static_assert( sizeof(wifi_pass) == FIELD_SIZE(wifi_config_t,sta.password) );
 
 esp_err_t connect_get_handler(httpd_req_t* req) {
   const char* resp = (const char*) connect_html;
@@ -42,25 +58,22 @@ esp_err_t connect_get_handler(httpd_req_t* req) {
   return ESP_OK;
 }
 
-void stop_access_point(void);
-void start_thermostat(void);
+void stop_http_and_wifi(void);
+void start_station(void);
 
 esp_err_t connect_post_handler(httpd_req_t* req) {
   char buf[sizeof(wifi_ssid)+sizeof(wifi_pass)];
   int remaining = req->content_len;
-  char *p = buf;
 
   if (remaining > sizeof(buf))
     return ESP_FAIL;
 
-  while (remaining > 0) {
+  for (char *p = buf; remaining > 0;) {
     const int ret = httpd_req_recv(req, p, remaining);
-    if (ret <= 0) {
-      // Retry receiving if timeout occurred
+    if (ret <= 0) { // Retry receiving if timeout occurred
       if (ret == HTTPD_SOCK_ERR_TIMEOUT) continue;
       return ESP_FAIL;
     }
-
     p += ret;
     remaining -= ret;
   }
@@ -72,12 +85,13 @@ esp_err_t connect_post_handler(httpd_req_t* req) {
   const size_t ssid_len = b-a;
   if (ssid_len < 3 || sizeof(wifi_ssid) < ssid_len) {
 bad_ssid:
-#define RESPONSE "SSID must be 2 to " STR(MAX_SSID_LEN) " bytes long"
+#define RESPONSE "SSID must be 2 to " STR(MAX_SSID_STRLEN) " bytes long"
     httpd_resp_set_status(req, "400 Bad Request");
     httpd_resp_send(req, RESPONSE, sizeof(RESPONSE));
 #undef RESPONSE
     return ESP_OK;
   }
+  memset(wifi_ssid,0,MAX_SSID_STRLEN+1); // zero out
   memcpy(wifi_ssid,a,ssid_len);
 
   a = b;
@@ -87,13 +101,14 @@ bad_ssid:
   const size_t pass_len = b-a;
   if (sizeof(wifi_pass) < pass_len) {
 bad_pass:
-#define RESPONSE "Password must be at most " STR(MAX_PASS_LEN) " bytes long"
+#define RESPONSE "Password must be at most " STR(MAX_PASS_STRLEN) " bytes long"
     httpd_resp_set_status(req, "400 Bad Request");
     httpd_resp_send(req, RESPONSE, sizeof(RESPONSE));
 #undef RESPONSE
     return ESP_OK;
   }
-  memcpy(wifi_pass,a,b-a);
+  memset(wifi_pass,0,MAX_PASS_STRLEN+1); // zero out
+  memcpy(wifi_pass,a,pass_len);
 
 #define RESPONSE "Connecting to "
   char resp[sizeof(RESPONSE)-1+sizeof(wifi_ssid)] = RESPONSE;
@@ -103,8 +118,8 @@ bad_pass:
 
   httpd_resp_send(req, resp, resp_len);
 
-  stop_access_point();
-  start_thermostat();
+  stop_http_and_wifi();
+  start_station();
 
   return ESP_OK;
 }
@@ -122,26 +137,6 @@ httpd_uri_t connect_post = {
   .handler   = connect_post_handler,
   .user_ctx  = NULL
 };
-
-void start_access_point(void) {
-  server = NULL;
-  httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-
-  if (httpd_start(&server, &config) == ESP_OK) {
-    // Set URI handlers
-    httpd_register_uri_handler(server, &connect_get);
-    httpd_register_uri_handler(server, &connect_post);
-  } else {
-    server = NULL;
-  }
-}
-
-void stop_access_point(void) {
-  sleep(5);
-}
-
-void start_thermostat(void) {
-}
 
 /* static void wifi_event_handler( */
 /*   void* arg, */
@@ -168,12 +163,8 @@ void start_thermostat(void) {
 /*   } */
 /* } */
 
-void app_main() {
-  tcpip_adapter_init();
-
-  ESP_ERROR_CHECK(nvs_flash_init());
-  ESP_ERROR_CHECK(esp_netif_init());
-  ESP_ERROR_CHECK(esp_event_loop_create_default());
+void start_access_point(void) {
+  puts(__FUNCTION__);
 
   wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
   ESP_ERROR_CHECK(esp_wifi_init(&cfg));
@@ -188,7 +179,7 @@ void app_main() {
   wifi_config_t wifi_config = {
     .ap = {
       .ssid = SSID,
-      .ssid_len = strlen(SSID),
+      .ssid_len = sizeof(SSID),
       .password = PASS,
       .max_connection = MAX_CONN,
       .authmode = WIFI_AUTH_WPA_WPA2_PSK
@@ -207,6 +198,154 @@ void app_main() {
   /*   "PASS: " PASS */
   /* ); */
 
-  // ----------------------------------------------------------------
+  /* server = NULL; */
+  /* httpd_config_t config = HTTPD_DEFAULT_CONFIG(); */
+  /*  */
+  /* if (httpd_start(&server, &config) == ESP_OK) { */
+  /*   // Set URI handlers */
+  /*   httpd_register_uri_handler(server, &connect_get); */
+  /*   httpd_register_uri_handler(server, &connect_post); */
+  /* } else { */
+  /*   server = NULL; */
+  /* } */
+}
+
+void stop_http_and_wifi(void) {
+  puts(__FUNCTION__);
+
+  /* if (server != NULL) { */
+  /*   puts("attempting httpd_stop"); */
+  /*   #<{(| httpd_stop(server); |)}># */
+  /*   server = NULL; */
+  /*   puts("httpd_stop ✔"); */
+  /* } */
+
+  ESP_ERROR_CHECK(esp_wifi_stop());
+  puts("esp_wifi_stop ✔");
+  /* ESP_ERROR_CHECK(esp_wifi_restore()); */
+  /* puts("esp_wifi_restore ✔"); */
+}
+
+static const char *TAG = "wifi station";
+
+static EventGroupHandle_t s_wifi_event_group;
+static int s_retry_num = 0;
+
+static void station_event_handler(
+  void* arg,
+  esp_event_base_t event_base,
+  int32_t event_id,
+  void* event_data
+) {
+  if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
+    esp_wifi_connect();
+  } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+    if (s_retry_num < 5) { // number of retries
+      esp_wifi_connect();
+      s_retry_num++;
+      ESP_LOGI(TAG, "retry to connect to the AP");
+    } else {
+      xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
+    }
+    ESP_LOGI(TAG,"connect to the AP fail");
+  } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
+    ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
+    ESP_LOGI(TAG, "got ip:%s", ip4addr_ntoa(&event->ip_info.ip));
+    s_retry_num = 0;
+    xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
+  }
+}
+
+void start_station(void) {
+  puts(__FUNCTION__);
+
+  s_wifi_event_group = xEventGroupCreate();
+
+  wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+  ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+
+  ESP_ERROR_CHECK(esp_event_handler_register(
+    WIFI_EVENT, ESP_EVENT_ANY_ID, &station_event_handler, NULL
+  ));
+  ESP_ERROR_CHECK(esp_event_handler_register(
+    IP_EVENT, IP_EVENT_STA_GOT_IP, &station_event_handler, NULL
+  ));
+
+  wifi_config_t wifi_config = {
+    .sta = { }
+  };
+  memcpy(wifi_config.sta.ssid    , wifi_ssid, MAX_SSID_STRLEN+1);
+  memcpy(wifi_config.sta.password, wifi_pass, MAX_PASS_STRLEN+1);
+  if (wifi_pass[0]) {
+    wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+  }
+
+  ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA) );
+  ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config) );
+  ESP_ERROR_CHECK(esp_wifi_start() );
+
+  // Waiting until either the connection is established (WIFI_CONNECTED_BIT) or
+  // connection failed for the maximum number of re-tries (WIFI_FAIL_BIT). The
+  // bits are set by station_event_handler() (see above)
+  EventBits_t bits = xEventGroupWaitBits(
+    s_wifi_event_group,
+    WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
+    pdFALSE,
+    pdFALSE,
+    portMAX_DELAY
+  );
+
+  // xEventGroupWaitBits() returns the bits before the call returned, hence we
+  // can test which event actually happened.
+  if (bits & WIFI_CONNECTED_BIT) {
+    puts("Connected to AP");
+  } else if (bits & WIFI_FAIL_BIT) {
+    puts("Failed to connect to AP");
+  } else {
+    puts("Unexpected WiFi connection event");
+  }
+
+  // TODO: if failed to connect, revert to AP mode
+
+  ESP_ERROR_CHECK(esp_event_handler_unregister(
+    IP_EVENT, IP_EVENT_STA_GOT_IP, &station_event_handler
+  ));
+  ESP_ERROR_CHECK(esp_event_handler_unregister(
+    WIFI_EVENT, ESP_EVENT_ANY_ID, &station_event_handler
+  ));
+
+  vEventGroupDelete(s_wifi_event_group);
+
+  /* server = NULL; */
+  /* httpd_config_t config = HTTPD_DEFAULT_CONFIG(); */
+  /*  */
+  /* if (httpd_start(&server, &config) == ESP_OK) { */
+  /*   // Set URI handlers */
+  /*   httpd_register_uri_handler(server, &connect_get); */
+  /*   httpd_register_uri_handler(server, &connect_post); */
+  /* } else { */
+  /*   server = NULL; */
+  /* } */
+}
+
+void app_main() {
+  tcpip_adapter_init();
+
+  ESP_ERROR_CHECK(nvs_flash_init());
+  ESP_ERROR_CHECK(esp_netif_init());
+  ESP_ERROR_CHECK(esp_event_loop_create_default());
+
+  server = NULL;
+  httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+
+  if (httpd_start(&server, &config) == ESP_OK) {
+    // Set URI handlers
+    httpd_register_uri_handler(server, &connect_get);
+    httpd_register_uri_handler(server, &connect_post);
+  } else {
+    server = NULL;
+  }
+
   start_access_point();
+  /* start_station(); */
 }
