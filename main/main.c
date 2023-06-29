@@ -120,6 +120,7 @@ bad_pass:
 
   httpd_resp_send(req, resp, resp_len);
 
+  esp_wifi_deauth_sta(0);
   ESP_ERROR_CHECK(esp_wifi_stop());
   start_station();
 
@@ -152,7 +153,7 @@ bad_pass:
 /* } */
 
 void start_access_point(void) {
-  puts(__FUNCTION__);
+  connected = false;
 
   wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
   ESP_ERROR_CHECK(esp_wifi_init(&cfg));
@@ -196,6 +197,10 @@ void start_access_point(void) {
   /* } else { */
   /*   server = NULL; */
   /* } */
+
+  tcpip_adapter_ip_info_t ip_info;
+  tcpip_adapter_get_ip_info(TCPIP_ADAPTER_IF_AP, &ip_info);
+  puts(ip4addr_ntoa(&ip_info.ip));
 }
 
 static EventGroupHandle_t s_wifi_event_group;
@@ -228,7 +233,7 @@ static void station_event_handler(
 }
 
 void start_station(void) {
-  puts(__FUNCTION__);
+  connected = true;
 
   s_wifi_event_group = xEventGroupCreate();
 
