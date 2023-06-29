@@ -10,7 +10,7 @@
 #include "esp_event.h"
 #include "esp_http_server.h"
 
-#include "esp_log.h"
+// #include "esp_log.h"
 
 #include "nvs.h"
 #include "nvs_flash.h"
@@ -21,9 +21,9 @@
 #define STR1(x) #x
 #define STR(x) STR1(x)
 
-/* #define FIELD_SIZE(t,f) (sizeof(((t*)0)->f)) */
+// #define FIELD_SIZE(t,f) (sizeof(((t*)0)->f))
 
-#define SSID      "esp-thermostat"
+#define SSID      "thermostat"
 #define PASS      "thermostat"
 #define MAX_CONN   8
 
@@ -50,7 +50,12 @@ char
 // static_assert( sizeof(wifi_ssid) == FIELD_SIZE(wifi_config_t,sta.ssid) );
 // static_assert( sizeof(wifi_pass) == FIELD_SIZE(wifi_config_t,sta.password) );
 
-esp_err_t connect_get_handler(httpd_req_t* req) {
+void start_access_point(void);
+void start_station(void);
+
+bool connected = false;
+
+esp_err_t get_handler_connect(httpd_req_t* req) {
   const char* resp = (const char*) connect_html;
 
   httpd_resp_send(req, resp, connect_html_end-connect_html);
@@ -58,10 +63,7 @@ esp_err_t connect_get_handler(httpd_req_t* req) {
   return ESP_OK;
 }
 
-void stop_http_and_wifi(void);
-void start_station(void);
-
-esp_err_t connect_post_handler(httpd_req_t* req) {
+esp_err_t post_handler_connect(httpd_req_t* req) {
   char buf[sizeof(wifi_ssid)+sizeof(wifi_pass)];
   int remaining = req->content_len;
 
@@ -118,25 +120,11 @@ bad_pass:
 
   httpd_resp_send(req, resp, resp_len);
 
-  stop_http_and_wifi();
+  ESP_ERROR_CHECK(esp_wifi_stop());
   start_station();
 
   return ESP_OK;
 }
-
-httpd_uri_t connect_get = {
-  .uri       = "/",
-  .method    = HTTP_GET,
-  .handler   = connect_get_handler,
-  .user_ctx  = NULL
-};
-
-httpd_uri_t connect_post = {
-  .uri       = "/",
-  .method    = HTTP_POST,
-  .handler   = connect_post_handler,
-  .user_ctx  = NULL
-};
 
 /* static void wifi_event_handler( */
 /*   void* arg, */
@@ -210,24 +198,6 @@ void start_access_point(void) {
   /* } */
 }
 
-void stop_http_and_wifi(void) {
-  puts(__FUNCTION__);
-
-  /* if (server != NULL) { */
-  /*   puts("attempting httpd_stop"); */
-  /*   #<{(| httpd_stop(server); |)}># */
-  /*   server = NULL; */
-  /*   puts("httpd_stop ✔"); */
-  /* } */
-
-  ESP_ERROR_CHECK(esp_wifi_stop());
-  puts("esp_wifi_stop ✔");
-  /* ESP_ERROR_CHECK(esp_wifi_restore()); */
-  /* puts("esp_wifi_restore ✔"); */
-}
-
-static const char *TAG = "wifi station";
-
 static EventGroupHandle_t s_wifi_event_group;
 static int s_retry_num = 0;
 
@@ -243,16 +213,17 @@ static void station_event_handler(
     if (s_retry_num < 5) { // number of retries
       esp_wifi_connect();
       s_retry_num++;
-      ESP_LOGI(TAG, "retry to connect to the AP");
+      puts("Retrying AP connection");
     } else {
       xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
     }
-    ESP_LOGI(TAG,"connect to the AP fail");
+    puts("AP connection failed");
   } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
     ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
-    ESP_LOGI(TAG, "got ip:%s", ip4addr_ntoa(&event->ip_info.ip));
     s_retry_num = 0;
     xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
+    puts("AP connection succeeded");
+    puts(ip4addr_ntoa(&event->ip_info.ip));
   }
 }
 
@@ -305,8 +276,6 @@ void start_station(void) {
     puts("Unexpected WiFi connection event");
   }
 
-  // TODO: if failed to connect, revert to AP mode
-
   ESP_ERROR_CHECK(esp_event_handler_unregister(
     IP_EVENT, IP_EVENT_STA_GOT_IP, &station_event_handler
   ));
@@ -316,17 +285,39 @@ void start_station(void) {
 
   vEventGroupDelete(s_wifi_event_group);
 
-  /* server = NULL; */
-  /* httpd_config_t config = HTTPD_DEFAULT_CONFIG(); */
-  /*  */
-  /* if (httpd_start(&server, &config) == ESP_OK) { */
-  /*   // Set URI handlers */
-  /*   httpd_register_uri_handler(server, &connect_get); */
-  /*   httpd_register_uri_handler(server, &connect_post); */
+  // Switch back to AP mode if connection failed
+  if (bits & WIFI_FAIL_BIT) {
+    ESP_ERROR_CHECK(esp_wifi_stop());
+    start_access_point();
+  }
+}
+
+esp_err_t get_handler(httpd_req_t* req) {
+  /* if (connected) { */
+  /*   return get_handler_thermostat(req); */
   /* } else { */
-  /*   server = NULL; */
+    return get_handler_connect(req);
   /* } */
 }
+esp_err_t post_handler(httpd_req_t* req) {
+  /* if (connected) { */
+  /*   return post_handler_thermostat(req); */
+  /* } else { */
+    return post_handler_connect(req);
+  /* } */
+}
+httpd_uri_t get_handler_def = {
+  .uri       = "/",
+  .method    = HTTP_GET,
+  .handler   = get_handler,
+  .user_ctx  = NULL
+};
+httpd_uri_t post_handler_def = {
+  .uri       = "/",
+  .method    = HTTP_POST,
+  .handler   = post_handler,
+  .user_ctx  = NULL
+};
 
 void app_main() {
   tcpip_adapter_init();
@@ -340,12 +331,12 @@ void app_main() {
 
   if (httpd_start(&server, &config) == ESP_OK) {
     // Set URI handlers
-    httpd_register_uri_handler(server, &connect_get);
-    httpd_register_uri_handler(server, &connect_post);
+    httpd_register_uri_handler(server, & get_handler_def);
+    httpd_register_uri_handler(server, &post_handler_def);
+
+    start_access_point();
   } else {
     server = NULL;
+    puts("Failed to start httpd");
   }
-
-  start_access_point();
-  /* start_station(); */
 }
