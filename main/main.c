@@ -38,6 +38,9 @@ static httpd_handle_t server = NULL;
 extern const uint8_t connect_html[] asm("_binary_connect_html_start");
 extern const uint8_t connect_html_end[] asm("_binary_connect_html_end");
 
+extern const uint8_t thermostat_html[] asm("_binary_thermostat_html_start");
+extern const uint8_t thermostat_html_end[] asm("_binary_thermostat_html_end");
+
 // ESP8266_RTOS_SDK/components/esp8266/include/esp_wifi_types.h
 #define MAX_SSID_STRLEN 31
 #define MAX_PASS_STRLEN 63
@@ -55,11 +58,25 @@ void start_station(void);
 
 bool connected = false;
 
+esp_err_t get_handler_thermostat(httpd_req_t* req) {
+  httpd_resp_send(
+    req,
+    (const char*) thermostat_html,
+    thermostat_html_end-thermostat_html
+  );
+  return ESP_OK;
+}
+
 esp_err_t get_handler_connect(httpd_req_t* req) {
-  const char* resp = (const char*) connect_html;
+  httpd_resp_send(
+    req,
+    (const char*) connect_html,
+    connect_html_end-connect_html
+  );
+  return ESP_OK;
+}
 
-  httpd_resp_send(req, resp, connect_html_end-connect_html);
-
+esp_err_t post_handler_thermostat(httpd_req_t* req) {
   return ESP_OK;
 }
 
@@ -298,18 +315,18 @@ void start_station(void) {
 }
 
 esp_err_t get_handler(httpd_req_t* req) {
-  /* if (connected) { */
-  /*   return get_handler_thermostat(req); */
-  /* } else { */
+  if (connected) {
+    return get_handler_thermostat(req);
+  } else {
     return get_handler_connect(req);
-  /* } */
+  }
 }
 esp_err_t post_handler(httpd_req_t* req) {
-  /* if (connected) { */
-  /*   return post_handler_thermostat(req); */
-  /* } else { */
+  if (connected) {
+    return post_handler_thermostat(req);
+  } else {
     return post_handler_connect(req);
-  /* } */
+  }
 }
 httpd_uri_t get_handler_def = {
   .uri       = "/",
