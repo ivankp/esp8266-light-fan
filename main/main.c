@@ -30,6 +30,10 @@
 #define WIFI_CONNECTED_BIT BIT0
 #define WIFI_FAIL_BIT      BIT1
 
+// AP = access point
+// STA = station
+// stations connect to an access point
+
 // default IP address: 192.168.4.1
 
 static httpd_handle_t server = NULL;
@@ -48,6 +52,38 @@ char
   wifi_ssid[MAX_SSID_STRLEN+1],
   wifi_pass[MAX_PASS_STRLEN+1];
 
+nvs_handle_t nvs;
+
+void nvs_get_ssid_pass(void) {
+  esp_err_t err;
+  size_t len;
+  /* nvs_get_str(nvs, "wifi_ssid", NULL, &required_size); */
+  len = sizeof(wifi_ssid);
+  err = nvs_get_str(nvs, "ssid", wifi_ssid, &len);
+  if (err != ESP_OK) goto err;
+  len = sizeof(wifi_pass);
+  err = nvs_get_str(nvs, "pass", wifi_pass, &len);
+  if (err != ESP_OK) goto err;
+
+  return;
+
+err:
+  wifi_ssid[0] = '\0';
+  wifi_pass[0] = '\0';
+}
+void nvs_set_ssid_pass(void) {
+  esp_err_t err;
+  err = nvs_set_str(nvs, "ssid", wifi_ssid);
+  if (err != ESP_OK) goto err;
+  err = nvs_set_str(nvs, "pass", wifi_pass);
+  if (err != ESP_OK) goto err;
+
+  return;
+
+err:
+  ;
+}
+
 // static_assert( sizeof(SSID) <= FIELD_SIZE(wifi_config_t,ap.ssid) );
 // static_assert( sizeof(PASS) <= FIELD_SIZE(wifi_config_t,ap.password) );
 // static_assert( sizeof(wifi_ssid) == FIELD_SIZE(wifi_config_t,sta.ssid) );
@@ -56,7 +92,7 @@ char
 void start_access_point(void);
 void start_station(void);
 
-bool connected = false;
+bool connected = false, new_ap = false;
 
 esp_err_t get_handler_thermostat(httpd_req_t* req) {
   httpd_resp_send(
@@ -128,6 +164,7 @@ bad_pass:
   }
   memset(wifi_pass,0,MAX_PASS_STRLEN+1); // zero out
   memcpy(wifi_pass,a,pass_len);
+  new_ap = true;
 
 #define RESPONSE "Connecting to "
   char resp[sizeof(RESPONSE)-1+sizeof(wifi_ssid)] = RESPONSE;
@@ -139,6 +176,7 @@ bad_pass:
 
   esp_wifi_deauth_sta(0);
   ESP_ERROR_CHECK(esp_wifi_stop());
+
   start_station();
 
   return ESP_OK;
@@ -298,6 +336,11 @@ void start_station(void) {
     puts("Unexpected WiFi connection event");
   }
 
+  if (new_ap) {
+    new_ap = false;
+    nvs_set_ssid_pass();
+  }
+
   ESP_ERROR_CHECK(esp_event_handler_unregister(
     IP_EVENT, IP_EVENT_STA_GOT_IP, &station_event_handler
   ));
@@ -341,24 +384,49 @@ httpd_uri_t post_handler_def = {
   .user_ctx  = NULL
 };
 
-void app_main() {
+void app_main(void) {
+  esp_err_t err;
+
   tcpip_adapter_init();
 
-  ESP_ERROR_CHECK(nvs_flash_init());
   ESP_ERROR_CHECK(esp_netif_init());
   ESP_ERROR_CHECK(esp_event_loop_create_default());
 
+  // Initialize NVS -------------------------------------------------
+  // https://github.com/espressif/esp-idf/blob/cf7e743a9b2e5fd2520be4ad047c8584188d54da/examples/storage/nvs_rw_value/main/nvs_value_example_main.c
+  err = nvs_flash_init();
+  if (
+    err == ESP_ERR_NVS_NO_FREE_PAGES ||
+    err == ESP_ERR_NVS_NEW_VERSION_FOUND
+  ) { // NVS partition was truncated and needs to be erased
+    ESP_ERROR_CHECK(nvs_flash_erase());
+    err = nvs_flash_init();
+  }
+  ESP_ERROR_CHECK(err);
+
+  err = nvs_open("storage", NVS_READWRITE, &nvs);
+  if (err != ESP_OK) {
+    puts("Failed to open nvs");
+    return;
+  }
+
+  nvs_get_ssid_pass();
+
+  // Start HTTP daemon ----------------------------------------------
   server = NULL;
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
 
-  if (httpd_start(&server, &config) == ESP_OK) {
-    // Set URI handlers
-    httpd_register_uri_handler(server, & get_handler_def);
-    httpd_register_uri_handler(server, &post_handler_def);
-
-    start_access_point();
-  } else {
-    server = NULL;
+  err = httpd_start(&server, &config);
+  if (err != ESP_OK) {
     puts("Failed to start httpd");
+    return;
   }
+
+  // Set URI handlers
+  httpd_register_uri_handler(server, & get_handler_def);
+  httpd_register_uri_handler(server, &post_handler_def);
+
+  // Start WiFi -----------------------------------------------------
+  if (wifi_ssid[0]) start_station();
+  else start_access_point();
 }
