@@ -1,10 +1,10 @@
 #!/bin/bash
 
 ls main \
-| sed -n 's/\.dev\.html$//p' \
+| sed -n '/^min_/d;s/\.html$//p' \
 | while read x; do
-  dev="main/$x.dev.html"
-  min="main/$x.html"
+  dev="main/$x.html"
+  min="main/min_$x.html"
   [ ! "$dev" -nt "$min" ] && continue
   sed '''
 s/^\s\+//;

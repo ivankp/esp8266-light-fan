@@ -41,11 +41,11 @@
 static httpd_handle_t server = NULL;
 
 // embed static files
-extern const uint8_t connect_html[] asm("_binary_connect_html_start");
-extern const uint8_t connect_html_end[] asm("_binary_connect_html_end");
+extern const uint8_t connect_html[] asm("_binary_min_connect_html_start");
+extern const uint8_t connect_html_end[] asm("_binary_min_connect_html_end");
 
-extern const uint8_t thermostat_html[] asm("_binary_thermostat_html_start");
-extern const uint8_t thermostat_html_end[] asm("_binary_thermostat_html_end");
+extern const uint8_t control_html[] asm("_binary_min_control_html_start");
+extern const uint8_t control_html_end[] asm("_binary_min_control_html_end");
 
 // ESP8266_RTOS_SDK/components/esp8266/include/esp_wifi_types.h
 #define MAX_SSID_STRLEN 31
@@ -99,8 +99,8 @@ bool connected = false, new_ap = false;
 esp_err_t get_handler_thermostat(httpd_req_t* req) {
   httpd_resp_send(
     req,
-    (const char*) thermostat_html,
-    thermostat_html_end-thermostat_html
+    (const char*) control_html,
+    control_html_end-control_html
   );
   return ESP_OK;
 }

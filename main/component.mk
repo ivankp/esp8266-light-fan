@@ -3,4 +3,4 @@
 #
 # (Uses default behaviour of compiling all source files in directory, adding 'include' to include path.)
 
-COMPONENT_EMBED_TXTFILES := connect.html thermostat.html
+COMPONENT_EMBED_TXTFILES := min_connect.html min_control.html
