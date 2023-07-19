@@ -4,6 +4,8 @@
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
 
+#include "driver/gpio.h"
+
 #include "esp_system.h"
 #include "esp_wifi.h"
 #include "esp_netif.h"
@@ -384,7 +386,36 @@ httpd_uri_t post_handler_def = {
   .user_ctx  = NULL
 };
 
+#define BUTTON 5
+
+static void button_isr_handler(void* arg) {
+  /* const uint32_t gpio_num = (uint32_t) arg; */
+  puts("Button pressed");
+}
+
 void app_main(void) {
+  // GPIO ===========================================================
+
+  gpio_config_t io_conf = {
+    .pin_bit_mask = BUTTON, // GPIO pin
+    .intr_type = GPIO_INTR_POSEDGE, // interrupt on siring edge
+    .mode = GPIO_MODE_INPUT,
+    .pull_up_en = 0,
+    .pull_down_en = 1
+  };
+  gpio_config(&io_conf);
+
+  /* // create a queue to handle gpio event from isr */
+  /* gpio_evt_queue = xQueueCreate(10,sizeof(uint32_t)); */
+  /* // start gpio task */
+  /* xTaskCreate(gpio_task_example, "gpio_task_example", 2048, NULL, 10, NULL); */
+
+  // install gpio isr service
+  gpio_install_isr_service(0);
+  // hook isr handler for specific gpio pin
+  gpio_isr_handler_add(BUTTON, button_isr_handler, NULL);
+
+  // HTTP ===========================================================
   esp_err_t err;
 
   tcpip_adapter_init();
