@@ -416,76 +416,25 @@ static TimerHandle_t button_timer = NULL;
 
 static volatile bool
   button_isr_enable = true,
-  /* button_timer_on = false, */
   relay_light = false,
   relay_fan   = false;
 
-/* static volatile uint8_t */
-/*   button_debounce = 0; */
-
-/* enum { */
-/*   BUTTON_IDLE, */
-/*   BUTTON_DEBOUNCE, */
-/* } volatile button_state; */
-
 static void button_isr(void *arg) {
-  /* #<{(| switch (button_state) { |)}># */
-  /* #<{(|   case BUTTON_IDLE: |)}># */
-  /* #<{(|     button_state = BUTTON_DEBOUNCE; |)}># */
-  /* if (button_isr_enable) { */
-  /*   #<{(| button_debounce = true; |)}># */
-  /*     uint32_t gpio_pin = (uint32_t)arg; */
-  /*     xQueueSendFromISR(gpio_evt_queue, &gpio_pin, NULL); */
-  /* } */
-  /*     #<{(| break; |)}># */
-  /*   #<{(| case BUTTON_DEBOUNCE: |)}># */
-  /* #<{(| } |)}># */
   if (button_isr_enable) {
     BaseType_t xHigherPriorityTaskWoken = pdTRUE;
     xTimerStartFromISR( button_timer, &xHigherPriorityTaskWoken );
   }
 }
 static void button_timer_callback(void *arg) {
-  /* button_timer_on = false; */
-  /* #<{(| hw_timer_disarm(); |)}># */
-  /* #<{(| hw_timer_deinit(); |)}># */
-  /*  */
   if (gpio_get_level(BUTTON_PIN)) { // if the input is still high
     button_isr_enable = false;
     gpio_set_level(LED_PIN, !/*GPIO2*/(relay_light = !relay_light));
     printf("Light %s\n",(relay_light ? "ON" : "OFF"));
     button_isr_enable = true;
   }
-  /* // TODO: record time */
-  /* // TODO: notify clients */
-  /*  */
-
-
-
+  // TODO: record time
+  // TODO: notify clients
 }
-/* static void hw_timer_test(void *arg) { */
-/*   puts("Timer event"); */
-/* } */
-
-/* static void button_task(void *arg) { */
-/*   uint32_t gpio_pin; */
-/*   for (;;) { */
-/*     if (xQueueReceive(gpio_evt_queue, &gpio_pin, portMAX_DELAY)) { */
-/*       #<{(| if (button_timer_on) { |)}># */
-/*       #<{(|   hw_timer_disarm(); |)}># */
-/*       #<{(| } else { |)}># */
-/*       #<{(|   hw_timer_init(button_timer_routine, NULL); |)}># */
-/*       #<{(|   button_timer_on = true; |)}># */
-/*       #<{(| } |)}># */
-/*       #<{(| hw_timer_alarm_us(100000,false); // false = one shot |)}># */
-/*  */
-/*       button_timer_routine(NULL); */
-/*  */
-/*       #<{(| gpio_set_level(LED_PIN, !(relay_light = !relay_light)); |)}># */
-/*       #<{(| printf("Pin %d: %d\n",gpio_pin,gpio_get_level(gpio_pin)); |)}># */
-/*     } */
-/*   } */
-/* } */
 
 void app_main(void) {
   /* // HTTP =========================================================== */
@@ -562,20 +511,15 @@ void app_main(void) {
 
   button_timer = xTimerCreate/*Static*/(
     "button_timer",
-    2000 / portTICK_PERIOD_MS, // period in ticks
+    25 / portTICK_PERIOD_MS, // period in ticks
     pdFALSE, // not periodic
     (void*) 0, // timer id
     button_timer_callback
     /* &button_timer_buffer */
   );
 
-  /* // install gpio isr service */
+  // install gpio isr service
   gpio_install_isr_service(0);
-  /* // hook isr handler for specific gpio pin */
+  // hook isr handler for specific gpio pin
   gpio_isr_handler_add(BUTTON_PIN, button_isr, (void*)BUTTON_PIN);
-
-  /* hw_timer_init(hw_timer_test, NULL); */
-  /* hw_timer_alarm_us(2000000, false); */
-  /* vTaskDelay(3000 / portTICK_RATE_MS); */
-  /* hw_timer_deinit(); */
 }
