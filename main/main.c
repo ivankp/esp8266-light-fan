@@ -406,6 +406,7 @@ httpd_uri_t post_handler_def = {
 };
 
 #define BUTTON_PIN 5
+#define LED_PIN 2
 
 static xQueueHandle gpio_evt_queue = NULL;
 
@@ -420,33 +421,15 @@ static void button_task(void *arg) {
   uint32_t gpio_pin;
   for (;;) {
     if (xQueueReceive(gpio_evt_queue, &gpio_pin, portMAX_DELAY)) {
+      /* gpio_isr_handler_remove(BUTTON_PIN); */
       /* ESP_LOGI(TAG, "GPIO[%d] intr, val: %d\n", io_num, gpio_get_level(io_num)); */
+      gpio_set_level(LED_PIN, !(relay_light = !relay_light));
       printf("Pin %d: %d\n",gpio_pin,gpio_get_level(gpio_pin));
     }
   }
 }
 
 void app_main(void) {
-  // GPIO ===========================================================
-  { gpio_config_t io_conf = {
-      .pin_bit_mask = (1ull << BUTTON_PIN), // GPIO pin
-      .intr_type = GPIO_INTR_POSEDGE, // interrupt on siring edge
-      .mode = GPIO_MODE_INPUT,
-      .pull_up_en = 0,
-      .pull_down_en = 1
-    };
-    gpio_config(&io_conf);
-  }
-
-  // create event queue and task
-  gpio_evt_queue = xQueueCreate(8,sizeof(uint32_t));
-  xTaskCreate(button_task, "button_task", 2048, NULL, 10, NULL);
-
-  // install gpio isr service
-  gpio_install_isr_service(0);
-  // hook isr handler for specific gpio pin
-  gpio_isr_handler_add(BUTTON_PIN, button_isr, (void*)BUTTON_PIN);
-
   // HTTP ===========================================================
   esp_err_t err;
 
@@ -493,8 +476,34 @@ void app_main(void) {
   if (wifi_ssid[0]) start_station();
   else start_access_point();
 
-  /* for (;;) { */
-  /*   puts(latch ? "ON" : "OFF"); */
-  /*   delayMicroseconds(1000000); */
-  /* } */
+  // GPIO ===========================================================
+  { gpio_config_t io_conf = {
+      .pin_bit_mask = (1ull << BUTTON_PIN), // GPIO pin
+      .intr_type = GPIO_INTR_POSEDGE, // interrupt on rising edge
+      .mode = GPIO_MODE_INPUT,
+      .pull_up_en = 0,
+      .pull_down_en = 1
+    };
+    gpio_config(&io_conf);
+  }
+  { gpio_config_t io_conf = {
+      .pin_bit_mask = (1ull << LED_PIN), // GPIO pin
+      .intr_type = GPIO_INTR_DISABLE, // no interrupt
+      .mode = GPIO_MODE_OUTPUT,
+      .pull_up_en = 0,
+      .pull_down_en = 0
+    };
+    gpio_config(&io_conf);
+  }
+
+  // create event queue and task
+  gpio_evt_queue = xQueueCreate(8,sizeof(uint32_t));
+  xTaskCreate(button_task, "button_task", 2048, NULL, 10, NULL);
+
+  // install gpio isr service
+  gpio_install_isr_service(0);
+  // hook isr handler for specific gpio pin
+  gpio_isr_handler_add(BUTTON_PIN, button_isr, (void*)BUTTON_PIN);
+
+  gpio_set_level(LED_PIN, !relay_light);
 }
