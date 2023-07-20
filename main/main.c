@@ -1,11 +1,13 @@
 #include <string.h>
 
 #include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "freertos/queue.h"
+/* #include "freertos/task.h" */
+/* #include "freertos/queue.h" */
+#include "freertos/timers.h"
 #include "freertos/event_groups.h"
 
 #include "driver/gpio.h"
+/* #include "driver/hw_timer.h" */
 
 #include "esp_system.h"
 #include "esp_wifi.h"
@@ -408,84 +410,131 @@ httpd_uri_t post_handler_def = {
 #define BUTTON_PIN 5
 #define LED_PIN 2
 
-static xQueueHandle gpio_evt_queue = NULL;
+/* static xQueueHandle gpio_evt_queue = NULL; */
+static TimerHandle_t button_timer = NULL;
+/* static StaticTimer_t button_timer_buffer; */
 
-static volatile bool relay_light = false;
-static volatile bool relay_fan   = false;
+static volatile bool
+  button_isr_enable = true,
+  /* button_timer_on = false, */
+  relay_light = false,
+  relay_fan   = false;
+
+/* static volatile uint8_t */
+/*   button_debounce = 0; */
+
+/* enum { */
+/*   BUTTON_IDLE, */
+/*   BUTTON_DEBOUNCE, */
+/* } volatile button_state; */
 
 static void button_isr(void *arg) {
-  uint32_t gpio_pin = (uint32_t)arg;
-  xQueueSendFromISR(gpio_evt_queue, &gpio_pin, NULL);
-}
-static void button_task(void *arg) {
-  uint32_t gpio_pin;
-  for (;;) {
-    if (xQueueReceive(gpio_evt_queue, &gpio_pin, portMAX_DELAY)) {
-      /* gpio_isr_handler_remove(BUTTON_PIN); */
-      /* ESP_LOGI(TAG, "GPIO[%d] intr, val: %d\n", io_num, gpio_get_level(io_num)); */
-      gpio_set_level(LED_PIN, !(relay_light = !relay_light));
-      printf("Pin %d: %d\n",gpio_pin,gpio_get_level(gpio_pin));
-    }
+  /* #<{(| switch (button_state) { |)}># */
+  /* #<{(|   case BUTTON_IDLE: |)}># */
+  /* #<{(|     button_state = BUTTON_DEBOUNCE; |)}># */
+  /* if (button_isr_enable) { */
+  /*   #<{(| button_debounce = true; |)}># */
+  /*     uint32_t gpio_pin = (uint32_t)arg; */
+  /*     xQueueSendFromISR(gpio_evt_queue, &gpio_pin, NULL); */
+  /* } */
+  /*     #<{(| break; |)}># */
+  /*   #<{(| case BUTTON_DEBOUNCE: |)}># */
+  /* #<{(| } |)}># */
+  if (button_isr_enable) {
+    BaseType_t xHigherPriorityTaskWoken = pdTRUE;
+    xTimerStartFromISR( button_timer, &xHigherPriorityTaskWoken );
   }
 }
+static void button_timer_callback(void *arg) {
+  /* button_timer_on = false; */
+  /* #<{(| hw_timer_disarm(); |)}># */
+  /* #<{(| hw_timer_deinit(); |)}># */
+  /*  */
+  if (gpio_get_level(BUTTON_PIN)) { // if the input is still high
+    button_isr_enable = false;
+    gpio_set_level(LED_PIN, !/*GPIO2*/(relay_light = !relay_light));
+    printf("Light %s\n",(relay_light ? "ON" : "OFF"));
+    button_isr_enable = true;
+  }
+  /* // TODO: record time */
+  /* // TODO: notify clients */
+  /*  */
+
+
+
+}
+/* static void hw_timer_test(void *arg) { */
+/*   puts("Timer event"); */
+/* } */
+
+/* static void button_task(void *arg) { */
+/*   uint32_t gpio_pin; */
+/*   for (;;) { */
+/*     if (xQueueReceive(gpio_evt_queue, &gpio_pin, portMAX_DELAY)) { */
+/*       #<{(| if (button_timer_on) { |)}># */
+/*       #<{(|   hw_timer_disarm(); |)}># */
+/*       #<{(| } else { |)}># */
+/*       #<{(|   hw_timer_init(button_timer_routine, NULL); |)}># */
+/*       #<{(|   button_timer_on = true; |)}># */
+/*       #<{(| } |)}># */
+/*       #<{(| hw_timer_alarm_us(100000,false); // false = one shot |)}># */
+/*  */
+/*       button_timer_routine(NULL); */
+/*  */
+/*       #<{(| gpio_set_level(LED_PIN, !(relay_light = !relay_light)); |)}># */
+/*       #<{(| printf("Pin %d: %d\n",gpio_pin,gpio_get_level(gpio_pin)); |)}># */
+/*     } */
+/*   } */
+/* } */
 
 void app_main(void) {
-  // HTTP ===========================================================
-  esp_err_t err;
-
-  tcpip_adapter_init();
-
-  ESP_ERROR_CHECK(esp_netif_init());
-  ESP_ERROR_CHECK(esp_event_loop_create_default());
-
-  // Initialize NVS -------------------------------------------------
-  // https://github.com/espressif/esp-idf/blob/cf7e743a9b2e5fd2520be4ad047c8584188d54da/examples/storage/nvs_rw_value/main/nvs_value_example_main.c
-  err = nvs_flash_init();
-  if (
-    err == ESP_ERR_NVS_NO_FREE_PAGES ||
-    err == ESP_ERR_NVS_NEW_VERSION_FOUND
-  ) { // NVS partition was truncated and needs to be erased
-    ESP_ERROR_CHECK(nvs_flash_erase());
-    err = nvs_flash_init();
-  }
-  ESP_ERROR_CHECK(err);
-
-  err = nvs_open("storage", NVS_READWRITE, &nvs);
-  if (err != ESP_OK) {
-    puts("Failed to open nvs");
-    return;
-  }
-
-  nvs_get_ssid_pass();
-
-  // Start HTTP daemon ----------------------------------------------
-  server = NULL;
-  httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-
-  err = httpd_start(&server, &config);
-  if (err != ESP_OK) {
-    puts("Failed to start httpd");
-    return;
-  }
-
-  // Set URI handlers
-  httpd_register_uri_handler(server, & get_handler_def);
-  httpd_register_uri_handler(server, &post_handler_def);
-
-  // Start WiFi -----------------------------------------------------
-  if (wifi_ssid[0]) start_station();
-  else start_access_point();
+  /* // HTTP =========================================================== */
+  /* esp_err_t err; */
+  /*  */
+  /* tcpip_adapter_init(); */
+  /*  */
+  /* ESP_ERROR_CHECK(esp_netif_init()); */
+  /* ESP_ERROR_CHECK(esp_event_loop_create_default()); */
+  /*  */
+  /* // Initialize NVS ------------------------------------------------- */
+  /* // https://github.com/espressif/esp-idf/blob/cf7e743a9b2e5fd2520be4ad047c8584188d54da/examples/storage/nvs_rw_value/main/nvs_value_example_main.c */
+  /* err = nvs_flash_init(); */
+  /* if ( */
+  /*   err == ESP_ERR_NVS_NO_FREE_PAGES || */
+  /*   err == ESP_ERR_NVS_NEW_VERSION_FOUND */
+  /* ) { // NVS partition was truncated and needs to be erased */
+  /*   ESP_ERROR_CHECK(nvs_flash_erase()); */
+  /*   err = nvs_flash_init(); */
+  /* } */
+  /* ESP_ERROR_CHECK(err); */
+  /*  */
+  /* err = nvs_open("storage", NVS_READWRITE, &nvs); */
+  /* if (err != ESP_OK) { */
+  /*   puts("Failed to open nvs"); */
+  /*   return; */
+  /* } */
+  /*  */
+  /* nvs_get_ssid_pass(); */
+  /*  */
+  /* // Start HTTP daemon ---------------------------------------------- */
+  /* server = NULL; */
+  /* httpd_config_t config = HTTPD_DEFAULT_CONFIG(); */
+  /*  */
+  /* err = httpd_start(&server, &config); */
+  /* if (err != ESP_OK) { */
+  /*   puts("Failed to start httpd"); */
+  /*   return; */
+  /* } */
+  /*  */
+  /* // Set URI handlers */
+  /* httpd_register_uri_handler(server, & get_handler_def); */
+  /* httpd_register_uri_handler(server, &post_handler_def); */
+  /*  */
+  /* // Start WiFi ----------------------------------------------------- */
+  /* if (wifi_ssid[0]) start_station(); */
+  /* else start_access_point(); */
 
   // GPIO ===========================================================
-  { gpio_config_t io_conf = {
-      .pin_bit_mask = (1ull << BUTTON_PIN), // GPIO pin
-      .intr_type = GPIO_INTR_POSEDGE, // interrupt on rising edge
-      .mode = GPIO_MODE_INPUT,
-      .pull_up_en = 0,
-      .pull_down_en = 1
-    };
-    gpio_config(&io_conf);
-  }
   { gpio_config_t io_conf = {
       .pin_bit_mask = (1ull << LED_PIN), // GPIO pin
       .intr_type = GPIO_INTR_DISABLE, // no interrupt
@@ -495,15 +544,38 @@ void app_main(void) {
     };
     gpio_config(&io_conf);
   }
+  gpio_set_level(LED_PIN, !/*GPIO2*/relay_light);
+
+  { gpio_config_t io_conf = {
+      .pin_bit_mask = (1ull << BUTTON_PIN), // GPIO pin
+      .intr_type = GPIO_INTR_POSEDGE, // interrupt on rising edge
+      .mode = GPIO_MODE_INPUT,
+      .pull_up_en = 0,
+      .pull_down_en = 1
+    };
+    gpio_config(&io_conf);
+  }
 
   // create event queue and task
-  gpio_evt_queue = xQueueCreate(8,sizeof(uint32_t));
-  xTaskCreate(button_task, "button_task", 2048, NULL, 10, NULL);
+  /* gpio_evt_queue = xQueueCreate(8,sizeof(uint32_t)); */
+  /* xTaskCreate(button_task, "button_task", 2048, NULL, 10, NULL); */
 
-  // install gpio isr service
+  button_timer = xTimerCreate/*Static*/(
+    "button_timer",
+    2000 / portTICK_PERIOD_MS, // period in ticks
+    pdFALSE, // not periodic
+    (void*) 0, // timer id
+    button_timer_callback
+    /* &button_timer_buffer */
+  );
+
+  /* // install gpio isr service */
   gpio_install_isr_service(0);
-  // hook isr handler for specific gpio pin
+  /* // hook isr handler for specific gpio pin */
   gpio_isr_handler_add(BUTTON_PIN, button_isr, (void*)BUTTON_PIN);
 
-  gpio_set_level(LED_PIN, !relay_light);
+  /* hw_timer_init(hw_timer_test, NULL); */
+  /* hw_timer_alarm_us(2000000, false); */
+  /* vTaskDelay(3000 / portTICK_RATE_MS); */
+  /* hw_timer_deinit(); */
 }
