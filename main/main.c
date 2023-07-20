@@ -2,6 +2,7 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/queue.h"
 #include "freertos/event_groups.h"
 
 #include "driver/gpio.h"
@@ -11,7 +12,7 @@
 #include "esp_netif.h"
 #include "esp_event.h"
 #include "esp_http_server.h"
-
+#include "esp_timer.h"
 // #include "esp_log.h"
 
 #include "nvs.h"
@@ -24,6 +25,24 @@
 #define STR(x) STR1(x)
 
 // #define FIELD_SIZE(t,f) (sizeof(((t*)0)->f))
+
+/*
+#define NOP() asm volatile ("nop")
+
+uint64_t IRAM_ATTR micros() {
+  return esp_timer_get_time();
+}
+void IRAM_ATTR delayMicroseconds(uint64_t us) {
+  uint64_t m = micros();
+  if (us) {
+    uint64_t e = (m + us);
+    if (m > e) { // overflow
+      while (micros() > e) { NOP(); }
+    }
+    while (micros() < e) { NOP(); }
+  }
+}
+*/
 
 #define SSID      "thermostat"
 #define PASS      "thermostat"
@@ -386,34 +405,47 @@ httpd_uri_t post_handler_def = {
   .user_ctx  = NULL
 };
 
-#define BUTTON 5
+#define BUTTON_PIN 5
 
-static void button_isr_handler(void* arg) {
-  /* const uint32_t gpio_num = (uint32_t) arg; */
-  puts("Button pressed");
+static xQueueHandle gpio_evt_queue = NULL;
+
+static volatile bool relay_light = false;
+static volatile bool relay_fan   = false;
+
+static void button_isr(void *arg) {
+  uint32_t gpio_pin = (uint32_t)arg;
+  xQueueSendFromISR(gpio_evt_queue, &gpio_pin, NULL);
+}
+static void button_task(void *arg) {
+  uint32_t gpio_pin;
+  for (;;) {
+    if (xQueueReceive(gpio_evt_queue, &gpio_pin, portMAX_DELAY)) {
+      /* ESP_LOGI(TAG, "GPIO[%d] intr, val: %d\n", io_num, gpio_get_level(io_num)); */
+      printf("Pin %d: %d\n",gpio_pin,gpio_get_level(gpio_pin));
+    }
+  }
 }
 
 void app_main(void) {
   // GPIO ===========================================================
+  { gpio_config_t io_conf = {
+      .pin_bit_mask = (1ull << BUTTON_PIN), // GPIO pin
+      .intr_type = GPIO_INTR_POSEDGE, // interrupt on siring edge
+      .mode = GPIO_MODE_INPUT,
+      .pull_up_en = 0,
+      .pull_down_en = 1
+    };
+    gpio_config(&io_conf);
+  }
 
-  gpio_config_t io_conf = {
-    .pin_bit_mask = BUTTON, // GPIO pin
-    .intr_type = GPIO_INTR_POSEDGE, // interrupt on siring edge
-    .mode = GPIO_MODE_INPUT,
-    .pull_up_en = 0,
-    .pull_down_en = 1
-  };
-  gpio_config(&io_conf);
-
-  /* // create a queue to handle gpio event from isr */
-  /* gpio_evt_queue = xQueueCreate(10,sizeof(uint32_t)); */
-  /* // start gpio task */
-  /* xTaskCreate(gpio_task_example, "gpio_task_example", 2048, NULL, 10, NULL); */
+  // create event queue and task
+  gpio_evt_queue = xQueueCreate(8,sizeof(uint32_t));
+  xTaskCreate(button_task, "button_task", 2048, NULL, 10, NULL);
 
   // install gpio isr service
   gpio_install_isr_service(0);
   // hook isr handler for specific gpio pin
-  gpio_isr_handler_add(BUTTON, button_isr_handler, NULL);
+  gpio_isr_handler_add(BUTTON_PIN, button_isr, (void*)BUTTON_PIN);
 
   // HTTP ===========================================================
   esp_err_t err;
@@ -460,4 +492,9 @@ void app_main(void) {
   // Start WiFi -----------------------------------------------------
   if (wifi_ssid[0]) start_station();
   else start_access_point();
+
+  /* for (;;) { */
+  /*   puts(latch ? "ON" : "OFF"); */
+  /*   delayMicroseconds(1000000); */
+  /* } */
 }
