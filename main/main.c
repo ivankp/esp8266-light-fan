@@ -411,29 +411,45 @@ httpd_uri_t post_handler_def = {
 #define LED_PIN 2
 
 /* static xQueueHandle gpio_evt_queue = NULL; */
-static TimerHandle_t button_timer = NULL;
 /* static StaticTimer_t button_timer_buffer; */
+static TimerHandle_t
+  button_debounce_timer = NULL,
+  button_multiclick_timer = NULL;
 
 static volatile bool
   button_isr_enable = true,
   relay_light = false,
   relay_fan   = false;
 
+static volatile uint8_t
+  button_click_count = 0;
+
 static void button_isr(void *arg) {
   if (button_isr_enable) {
     BaseType_t xHigherPriorityTaskWoken = pdTRUE;
-    xTimerStartFromISR( button_timer, &xHigherPriorityTaskWoken );
+    xTimerStartFromISR( button_debounce_timer, &xHigherPriorityTaskWoken );
   }
 }
-static void button_timer_callback(void *arg) {
+static void button_debounce_timer_callback(void *arg) {
   if (gpio_get_level(BUTTON_PIN)) { // if the input is still high
     button_isr_enable = false;
-    gpio_set_level(LED_PIN, !/*GPIO2*/(relay_light = !relay_light));
-    printf("Light %s\n",(relay_light ? "ON" : "OFF"));
+    xTimerStart( button_multiclick_timer, 10 );
+    ++button_click_count;
+    button_click_count %= 3;
     button_isr_enable = true;
   }
   // TODO: record time
   // TODO: notify clients
+}
+static void button_multiclick_timer_callback(void *arg) {
+  if (button_click_count == 1) {
+    gpio_set_level(LED_PIN, !/*GPIO2*/(relay_light = !relay_light));
+    printf("Light %s\n",(relay_light ? "ON" : "OFF"));
+  } else if (button_click_count == 2) {
+    relay_fan = !relay_fan;
+    printf("Fan %s\n",(relay_fan ? "ON" : "OFF"));
+  }
+  button_click_count = 0;
 }
 
 void app_main(void) {
@@ -509,12 +525,20 @@ void app_main(void) {
   /* gpio_evt_queue = xQueueCreate(8,sizeof(uint32_t)); */
   /* xTaskCreate(button_task, "button_task", 2048, NULL, 10, NULL); */
 
-  button_timer = xTimerCreate/*Static*/(
-    "button_timer",
-    25 / portTICK_PERIOD_MS, // period in ticks
+  button_debounce_timer = xTimerCreate/*Static*/(
+    "",
+    30 / portTICK_PERIOD_MS, // period in ticks
     pdFALSE, // not periodic
     (void*) 0, // timer id
-    button_timer_callback
+    button_debounce_timer_callback
+    /* &button_timer_buffer */
+  );
+  button_multiclick_timer = xTimerCreate/*Static*/(
+    "",
+    300 / portTICK_PERIOD_MS, // period in ticks
+    pdFALSE, // not periodic
+    (void*) 0, // timer id
+    button_multiclick_timer_callback
     /* &button_timer_buffer */
   );
 
