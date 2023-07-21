@@ -7,7 +7,6 @@
 #include "freertos/event_groups.h"
 
 #include "driver/gpio.h"
-/* #include "driver/hw_timer.h" */
 
 #include "esp_system.h"
 #include "esp_wifi.h"
@@ -397,7 +396,6 @@ static TimerHandle_t
   button_multiclick_timer = NULL;
 
 static volatile bool
-  button_isr_enable = true,
   relay_light = false,
   relay_fan   = false;
 
@@ -405,21 +403,15 @@ static volatile uint8_t
   button_click_count = 0;
 
 static void button_isr(void *arg) {
-  if (button_isr_enable) {
-    BaseType_t xHigherPriorityTaskWoken = pdTRUE;
-    xTimerStartFromISR( button_debounce_timer, &xHigherPriorityTaskWoken );
-  }
+  BaseType_t xHigherPriorityTaskWoken = pdTRUE;
+  xTimerStartFromISR( button_debounce_timer, &xHigherPriorityTaskWoken );
 }
 static void button_debounce_timer_callback(void *arg) {
   if (gpio_get_level(BUTTON_PIN)) { // if the input is still high
-    button_isr_enable = false;
     xTimerStart( button_multiclick_timer, 10 );
     ++button_click_count;
     button_click_count %= 3;
-    button_isr_enable = true;
   }
-  // TODO: record time
-  // TODO: notify clients
 }
 static void button_multiclick_timer_callback(void *arg) {
   if (button_click_count == 1) {
@@ -430,6 +422,7 @@ static void button_multiclick_timer_callback(void *arg) {
     printf("Fan %s\n",(relay_fan ? "ON" : "OFF"));
   }
   button_click_count = 0;
+  // TODO: notify clients
 }
 
 void app_main(void) {
