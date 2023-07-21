@@ -28,24 +28,6 @@
 
 // #define FIELD_SIZE(t,f) (sizeof(((t*)0)->f))
 
-/*
-#define NOP() asm volatile ("nop")
-
-uint64_t IRAM_ATTR micros() {
-  return esp_timer_get_time();
-}
-void IRAM_ATTR delayMicroseconds(uint64_t us) {
-  uint64_t m = micros();
-  if (us) {
-    uint64_t e = (m + us);
-    if (m > e) { // overflow
-      while (micros() > e) { NOP(); }
-    }
-    while (micros() < e) { NOP(); }
-  }
-}
-*/
-
 #define SSID      "thermostat"
 #define PASS      "thermostat"
 #define MAX_CONN   8
@@ -71,9 +53,9 @@ extern const uint8_t control_html_end[] asm("_binary_min_control_html_end");
 // ESP8266_RTOS_SDK/components/esp8266/include/esp_wifi_types.h
 #define MAX_SSID_STRLEN 31
 #define MAX_PASS_STRLEN 63
-char
-  wifi_ssid[MAX_SSID_STRLEN+1],
-  wifi_pass[MAX_PASS_STRLEN+1];
+static char
+  wifi_ssid[MAX_SSID_STRLEN+1] = { '\0' },
+  wifi_pass[MAX_PASS_STRLEN+1] = { '\0' };
 
 nvs_handle_t nvs;
 
@@ -115,7 +97,7 @@ err:
 void start_access_point(void);
 void start_station(void);
 
-bool connected = false, new_ap = false;
+static bool connected = false, new_ap = false;
 
 esp_err_t get_handler_thermostat(httpd_req_t* req) {
   httpd_resp_send(
@@ -359,11 +341,6 @@ void start_station(void) {
     puts("Unexpected WiFi connection event");
   }
 
-  if (new_ap) {
-    new_ap = false;
-    nvs_set_ssid_pass();
-  }
-
   ESP_ERROR_CHECK(esp_event_handler_unregister(
     IP_EVENT, IP_EVENT_STA_GOT_IP, &station_event_handler
   ));
@@ -377,6 +354,9 @@ void start_station(void) {
   if (bits & WIFI_FAIL_BIT) {
     ESP_ERROR_CHECK(esp_wifi_stop());
     start_access_point();
+  } else if (new_ap) {
+    new_ap = false;
+    nvs_set_ssid_pass();
   }
 }
 
@@ -453,51 +433,53 @@ static void button_multiclick_timer_callback(void *arg) {
 }
 
 void app_main(void) {
-  /* // HTTP =========================================================== */
-  /* esp_err_t err; */
-  /*  */
-  /* tcpip_adapter_init(); */
-  /*  */
-  /* ESP_ERROR_CHECK(esp_netif_init()); */
-  /* ESP_ERROR_CHECK(esp_event_loop_create_default()); */
-  /*  */
-  /* // Initialize NVS ------------------------------------------------- */
-  /* // https://github.com/espressif/esp-idf/blob/cf7e743a9b2e5fd2520be4ad047c8584188d54da/examples/storage/nvs_rw_value/main/nvs_value_example_main.c */
-  /* err = nvs_flash_init(); */
-  /* if ( */
-  /*   err == ESP_ERR_NVS_NO_FREE_PAGES || */
-  /*   err == ESP_ERR_NVS_NEW_VERSION_FOUND */
-  /* ) { // NVS partition was truncated and needs to be erased */
-  /*   ESP_ERROR_CHECK(nvs_flash_erase()); */
-  /*   err = nvs_flash_init(); */
-  /* } */
-  /* ESP_ERROR_CHECK(err); */
-  /*  */
-  /* err = nvs_open("storage", NVS_READWRITE, &nvs); */
-  /* if (err != ESP_OK) { */
-  /*   puts("Failed to open nvs"); */
-  /*   return; */
-  /* } */
-  /*  */
-  /* nvs_get_ssid_pass(); */
-  /*  */
-  /* // Start HTTP daemon ---------------------------------------------- */
-  /* server = NULL; */
-  /* httpd_config_t config = HTTPD_DEFAULT_CONFIG(); */
-  /*  */
-  /* err = httpd_start(&server, &config); */
-  /* if (err != ESP_OK) { */
-  /*   puts("Failed to start httpd"); */
-  /*   return; */
-  /* } */
-  /*  */
-  /* // Set URI handlers */
-  /* httpd_register_uri_handler(server, & get_handler_def); */
-  /* httpd_register_uri_handler(server, &post_handler_def); */
-  /*  */
-  /* // Start WiFi ----------------------------------------------------- */
-  /* if (wifi_ssid[0]) start_station(); */
-  /* else start_access_point(); */
+  // HTTP ===========================================================
+  esp_err_t err;
+
+  tcpip_adapter_init();
+
+  ESP_ERROR_CHECK(esp_netif_init());
+  ESP_ERROR_CHECK(esp_event_loop_create_default());
+
+  // Initialize NVS -------------------------------------------------
+  // https://github.com/espressif/esp-idf/blob/cf7e743a9b2e5fd2520be4ad047c8584188d54da/examples/storage/nvs_rw_value/main/nvs_value_example_main.c
+  err = nvs_flash_init();
+  if (
+    err == ESP_ERR_NVS_NO_FREE_PAGES ||
+    err == ESP_ERR_NVS_NEW_VERSION_FOUND
+  ) { // NVS partition was truncated and needs to be erased
+    ESP_ERROR_CHECK(nvs_flash_erase());
+    err = nvs_flash_init();
+  }
+  ESP_ERROR_CHECK(err);
+
+  err = nvs_open("storage", NVS_READWRITE, &nvs);
+  if (err != ESP_OK) {
+    puts("Failed to open nvs");
+    goto skip_wifi;
+  }
+
+  nvs_get_ssid_pass();
+
+  // Start HTTP daemon ----------------------------------------------
+  server = NULL;
+  httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+
+  err = httpd_start(&server, &config);
+  if (err != ESP_OK) {
+    puts("Failed to start httpd");
+    goto skip_wifi;
+  }
+
+  // Set URI handlers
+  httpd_register_uri_handler(server, & get_handler_def);
+  httpd_register_uri_handler(server, &post_handler_def);
+
+  // Start WiFi -----------------------------------------------------
+  if (wifi_ssid[0]) start_station();
+  else start_access_point();
+
+skip_wifi: ;
 
   // GPIO ===========================================================
   { gpio_config_t io_conf = {
@@ -527,7 +509,7 @@ void app_main(void) {
 
   button_debounce_timer = xTimerCreate/*Static*/(
     "",
-    30 / portTICK_PERIOD_MS, // period in ticks
+    20 / portTICK_PERIOD_MS, // period in ticks
     pdFALSE, // not periodic
     (void*) 0, // timer id
     button_debounce_timer_callback
