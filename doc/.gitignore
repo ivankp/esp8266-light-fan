@@ -1,0 +1,15 @@
+/*
+
+!.gitignore
+!Makefile
+!*.tex
+!*.bib
+!*.sty
+!*.cls
+!*.lua
+!*.cfg
+
+!fig
+
+.*.swp
+.*.swx

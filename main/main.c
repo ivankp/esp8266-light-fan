@@ -43,11 +43,11 @@
 static httpd_handle_t server = NULL;
 
 // embed static files
-extern const uint8_t connect_html[] asm("_binary_min_connect_html_start");
-extern const uint8_t connect_html_end[] asm("_binary_min_connect_html_end");
+extern const uint8_t connect_html[] asm("_binary_min_connect_html_gz_start");
+extern const uint8_t connect_html_end[] asm("_binary_min_connect_html_gz_end");
 
-extern const uint8_t control_html[] asm("_binary_min_control_html_start");
-extern const uint8_t control_html_end[] asm("_binary_min_control_html_end");
+extern const uint8_t control_html[] asm("_binary_min_control_html_gz_start");
+extern const uint8_t control_html_end[] asm("_binary_min_control_html_gz_end");
 
 // ESP8266_RTOS_SDK/components/esp8266/include/esp_wifi_types.h
 #define MAX_SSID_STRLEN 31
@@ -99,6 +99,7 @@ void start_station(void);
 static bool connected = false, new_ap = false;
 
 esp_err_t get_handler_thermostat(httpd_req_t* req) {
+  httpd_resp_set_hdr(req,"Content-Encoding","gzip");
   httpd_resp_send(
     req,
     (const char*) control_html,
@@ -108,6 +109,7 @@ esp_err_t get_handler_thermostat(httpd_req_t* req) {
 }
 
 esp_err_t get_handler_connect(httpd_req_t* req) {
+  httpd_resp_set_hdr(req,"Content-Encoding","gzip");
   httpd_resp_send(
     req,
     (const char*) connect_html,

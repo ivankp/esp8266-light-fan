@@ -8,28 +8,182 @@
 <style>
 body {
   margin: 8pt;
+  font-size: 1.25em;
+  font-family: sans-serif;
 }
+h1 {
+  font-size: 1.25em;
+  font-weight: bold;
+  margin: 0.5em 0;
+}
+fieldset {
+  border-radius: 0.5em;
+  margin: 0.5em 0;
+}
+
+.T {
+  font-size: 1.05em;
+  font-weight: bold;
+}
+
+.Tunit {
+  font-size: 1.05em;
+}
+
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 1.925em;
+  height: 1em;
+}
+
+.switch {
+  font-size: 1.2em;
+}
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #ccc;
+  -webkit-transition: .2s;
+  transition: .2s;
+  border-radius: 1em;
+}
+
+.slider:before {
+  position: absolute;
+  content: "";
+  height: 0.65em;
+  width: 0.65em;
+  left: 0.195em;
+  bottom: 0.175em;
+  background-color: white;
+  -webkit-transition: .2s;
+  transition: .2s;
+  border-radius: 50%;
+}
+
+input:checked + .slider:before {
+  -webkit-transform: translateX(0.9em);
+  -ms-transform: translateX(0.9em);
+  transform: translateX(0.9em);
+}
+
+input:checked + .slider.light.on {
+  background-color: #FFAE27;
+}
+input:checked + .slider.fan.on {
+  background-color: #58B7EA;
+}
+input:checked + .slider.cool.on {
+  background-color: #1871E5;
+}
+input:checked + .slider.heat.on {
+  background-color: #F2403C;
+}
+
 </style>
 <script>
+const $id = id => document.getElementById(id);
+
+const $ = (p,...args) => {
+  if (p===null) {
+    const x = args.shift();
+    p = document.createElement(x);
+  } else if (p.constructor === String) {
+    p = (
+      args[0] instanceof Element ? args.shift() : document.body
+    ).querySelector(p);
+  } else if (p.constructor === Array) {
+    return p.map(x => $(x,...args));
+  }
+  for (let x of args) {
+    if (x.constructor === String) {
+      p = p.appendChild(document.createElement(x));
+    } else if (x.constructor === Array) {
+      for (let c of x) {
+        const rm = c[0] === '-';
+        if (rm) c = c.substr(1);
+        if (!!c) {
+          if (rm) p.classList.remove(c);
+          else p.classList.add(c);
+        }
+      }
+    } else if (x.constructor === Object) {
+      for (const [key,val] of Object.entries(x)) {
+        if (key==='style') {
+          for (const [skey,sval] of Object.entries(val)) {
+            if (sval!==null) p.style[skey] = sval;
+            else p.style.removeProperty(skey);
+          }
+        } else if (key==='events') {
+          for (const [k,v] of Object.entries(val)) {
+            if (v!==null) p.addEventListener(k,v);
+            else p.removeEventListener(k);
+          }
+        } else {
+          if (val!==null) p.setAttribute(key,val);
+          else p.removeAttribute(key);
+        }
+      }
+    }
+  }
+  return p;
+};
+
 document.addEventListener('DOMContentLoaded', () => {
+  let el = $(document.body,'h1');
+  el.textContent = 'Readings';
+  for (const [name,items] of [
+    ['Temperature',[['Tm','Measured'],['Tt','Target']]]
+  ]) {
+    const f = $(null,'fieldset');
+    $(f,'legend').textContent = name;
+    for (const [id,item] of items) {
+      $(f,'div').textContent = item;
+      $(f,'div',['T'],{id}).textContent = '??';
+      $(f,'div',['Tunit']).textContent = '°F';
+    }
+    el.after(f);
+    el = f;
+  }
+
+  el = $(document.body,'h1');
+  el.textContent = 'Control';
+  for (const [name,items] of [
+    ['Ceiling',[['light','Light'],['fan','Fan']]],
+    ['Thermostat',[['cool','Cool'],['heat','Heat']]]
+  ]) {
+    const f = $(null,'fieldset');
+    $(f,'legend').textContent = name;
+    for (const [c,item] of items) {
+      $(f,'div').textContent = item;
+      const l = $(f,'div','label',['switch']);
+      $(l,'input',{type:'checkbox', events: {
+        change: function(){
+          if (name==='Thermostat' && this.checked)
+            for (const x of f.getElementsByTagName('input'))
+              if (x!==this) x.checked = false;
+        }
+      }});
+      $(l,'span',['slider',c]);
+    }
+    el.after(f);
+    el = f;
+  }
 });
 </script>
 </head>
 <body>
-  <table>
 
-    <tr><td>
-      Target temperature
-    </td><td>
-      68°F
-    </td></tr>
-
-    <tr><td>
-      Measured temperature
-    </td><td>
-      70°F
-    </td></tr>
-
-  </table>
 </body>
 </html>
