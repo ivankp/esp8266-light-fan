@@ -11,6 +11,9 @@ body {
   font-size: 1.25em;
   font-family: sans-serif;
 }
+
+.click { cursor: pointer; }
+
 h1 {
   font-size: 1.25em;
   font-weight: bold;
@@ -20,6 +23,16 @@ fieldset {
   border-radius: 0.5em;
   margin: 0.5em 0;
 }
+
+fieldset > table { border-spacing: 0; }
+fieldset > table td {
+  padding: 0.5em 0 0 0.25em;
+}
+fieldset > table td:first-child {
+  padding-left: 0;
+  padding-right: 0.5em;
+}
+fieldset > table tr:first-child > td { padding-top: 0; }
 
 .T {
   font-size: 1.05em;
@@ -141,44 +154,43 @@ const $ = (p,...args) => {
 };
 
 document.addEventListener('DOMContentLoaded', () => {
-  let el = $(document.body,'h1');
-  el.textContent = 'Readings';
+  const b = document.body;
+  $(b,'h1').textContent = 'Readings';
   for (const [name,items] of [
     ['Temperature',[['Tm','Measured'],['Tt','Target']]]
   ]) {
-    const f = $(null,'fieldset');
+    const f = $(b,'fieldset');
     $(f,'legend').textContent = name;
+    const t = $(f,'table');
     for (const [id,item] of items) {
-      $(f,'div').textContent = item;
-      $(f,'div',['T'],{id}).textContent = '??';
-      $(f,'div',['Tunit']).textContent = '°F';
+      const tr = $(t,'tr');
+      $(tr,'td').textContent = item+':';
+      $(tr,'td',['T'],{id}).textContent = '??';
+      $(tr,'td',['Tunit','click']).textContent = '°F';
     }
-    el.after(f);
-    el = f;
   }
 
-  el = $(document.body,'h1');
-  el.textContent = 'Control';
+  $(b,'h1').textContent = 'Control';
   for (const [name,items] of [
     ['Ceiling',[['light','Light'],['fan','Fan']]],
     ['Thermostat',[['cool','Cool'],['heat','Heat']]]
   ]) {
-    const f = $(null,'fieldset');
+    const f = $(b,'fieldset');
     $(f,'legend').textContent = name;
-    for (const [c,item] of items) {
-      $(f,'div').textContent = item;
-      const l = $(f,'div','label',['switch']);
-      $(l,'input',{type:'checkbox', events: {
+    const t = $(f,'table');
+    for (const [id,item] of items) {
+      const tr = $(t,'tr');
+      $(tr,'td').textContent = item+':';
+      const s = $(tr,'td','label',['switch']);
+      $(s,'input',{id, type:'checkbox', events: {
         change: function(){
           if (name==='Thermostat' && this.checked)
             for (const x of f.getElementsByTagName('input'))
               if (x!==this) x.checked = false;
         }
       }});
-      $(l,'span',['slider',c]);
+      $(s,'span',['slider']);
     }
-    el.after(f);
-    el = f;
   }
 });
 </script>
