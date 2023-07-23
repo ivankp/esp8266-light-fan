@@ -79,29 +79,33 @@ fieldset > table tr:first-child > td { padding-top: 0; }
   width: 0.65em;
   left: 0.195em;
   bottom: 0.175em;
-  background-color: white;
-  -webkit-transition: .2s;
-  transition: .2s;
   border-radius: 50%;
+  background-color: white;
+  transition: .2s;
+  -webkit-transition: .2s;
 }
 
 input:checked + .slider:before {
+  transform: translateX(0.9em);
   -webkit-transform: translateX(0.9em);
   -ms-transform: translateX(0.9em);
-  transform: translateX(0.9em);
 }
 
-input:checked + .slider.light.on {
+input#light:checked + .slider.on {
   background-color: #FFAE27;
 }
-input:checked + .slider.fan.on {
+input#fan:checked + .slider.on {
   background-color: #58B7EA;
 }
-input:checked + .slider.cool.on {
+input#cool:checked + .slider.on {
   background-color: #1871E5;
 }
-input:checked + .slider.heat.on {
+input#heat:checked + .slider.on {
   background-color: #F2403C;
+}
+
+input:disabled + .slider {
+  background-color: #eee;
 }
 
 </style>
@@ -171,26 +175,45 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   $(b,'h1').textContent = 'Control';
-  for (const [name,items] of [
-    ['Ceiling',[['light','Light'],['fan','Fan']]],
-    ['Thermostat',[['cool','Cool'],['heat','Heat']]]
+  const all_inputs = [ ];
+  for (const [name,items,one] of [
+    ['Ceiling',[['light','Light'],['fan','Fan']],false],
+    ['Thermostat',[['cool','Cool'],['heat','Heat']],true]
   ]) {
     const f = $(b,'fieldset');
     $(f,'legend').textContent = name;
     const t = $(f,'table');
+    const inputs = [ ];
     for (const [id,item] of items) {
       const tr = $(t,'tr');
       $(tr,'td').textContent = item+':';
       const s = $(tr,'td','label',['switch']);
-      $(s,'input',{id, type:'checkbox', events: {
+      inputs.push($(s,'input',{id, type:'checkbox', events: {
         change: function(){
-          if (name==='Thermostat' && this.checked)
-            for (const x of f.getElementsByTagName('input'))
+          // for (const x of all_inputs) x.disabled = true;
+          // const cmd = { };
+          const q = new URLSearchParams();
+          if (one) {
+            for (const x of inputs) {
               if (x!==this) x.checked = false;
+              $(x,['-on']);
+              // cmd[x.id] = x.checked;
+              q.set(x.id,x.checked?'1':'0');
+            }
+          } else {
+            $(this,['-on']);
+            // cmd[this.id] = this.checked;
+            q.set(this.id,this.checked?'1':'0');
+          }
+          console.log(q.toString());
+          // setTimeout(() => {
+          //   for (const x of all_inputs) x.disabled = false;
+          // }, 1000);
         }
-      }});
+      }}));
       $(s,'span',['slider']);
     }
+    all_inputs.push(...inputs);
   }
 });
 </script>
