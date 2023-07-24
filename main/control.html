@@ -128,6 +128,16 @@ const $ = (p,...args) => {
   return p;
 };
 
+const T = { };
+
+const toggle = (id,val) => {
+  const input = $id(id);
+  if (input) {
+    if (input.old = input.checked = val) input.classList.add('on');
+    else input.classList.remove('on');
+  }
+};
+
 document.addEventListener('DOMContentLoaded', () => {
   const b = document.body;
 
@@ -141,7 +151,8 @@ document.addEventListener('DOMContentLoaded', () => {
       const tr = $(t,'tr');
       $(tr,'td').textContent = item+':';
       $(tr,'td',['T'],{id}).textContent = '??';
-      $(tr,'td',['Tunit','click']).textContent = '°F';
+      $(tr,'td',['Tunit','click'],{ events: { click: function(){
+      }}}).textContent = '°F';
     }
   }
 
@@ -180,17 +191,13 @@ document.addEventListener('DOMContentLoaded', () => {
           fetch('set?'+q.toString(),{ referrer: '' })
           .then(resp => resp.json())
           .then(resp => {
+            console.log(resp);
             if ('error' in resp) {
-              console.log(resp);
               alert(resp.error);
               restore();
             } else {
-              for (const [key,val] of Object.entries(resp)) {
-                const input = $id(key);
-                if (!input) continue;
-                if (input.old = input.checked = val) input.classList.add('on');
-                else input.classList.remove('on');
-              }
+              for (const [key,val] of Object.entries(resp))
+                toggle(key,val);
             }
           })
           .catch(e => {
@@ -205,6 +212,27 @@ document.addEventListener('DOMContentLoaded', () => {
       $(s,'span',['slider']);
     }
   }
+
+  fetch('get',{ referrer: '' })
+  .then(resp => resp.json())
+  .then(resp => {
+    console.log(resp);
+    if ('error' in resp) {
+      alert(resp.error);
+    } else {
+      for (const [key,val] of Object.entries(resp)) {
+        if (key[0]==='T') {
+          T[key] = val;
+        } else {
+          toggle(key,val);
+        }
+      }
+    }
+  })
+  .catch(e => {
+    alert('Request failed');
+    throw e;
+  });
 });
 </script>
 </head>
