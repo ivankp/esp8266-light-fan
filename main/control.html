@@ -91,16 +91,16 @@ input:checked + .slider:before {
   -ms-transform: translateX(0.9em);
 }
 
-input#light:checked + .slider.on {
+input#light.on:checked + .slider {
   background-color: #FFAE27;
 }
-input#fan:checked + .slider.on {
+input#fan.on:checked + .slider {
   background-color: #58B7EA;
 }
-input#cool:checked + .slider.on {
+input#cool.on:checked + .slider {
   background-color: #1871E5;
 }
-input#heat:checked + .slider.on {
+input#heat.on:checked + .slider {
   background-color: #F2403C;
 }
 
@@ -127,14 +127,8 @@ const $ = (p,...args) => {
     if (x.constructor === String) {
       p = p.appendChild(document.createElement(x));
     } else if (x.constructor === Array) {
-      for (let c of x) {
-        const rm = c[0] === '-';
-        if (rm) c = c.substr(1);
-        if (!!c) {
-          if (rm) p.classList.remove(c);
-          else p.classList.add(c);
-        }
-      }
+      for (let c of x)
+        p.classList.add(c);
     } else if (x.constructor === Object) {
       for (const [key,val] of Object.entries(x)) {
         if (key==='style') {
@@ -157,6 +151,10 @@ const $ = (p,...args) => {
   return p;
 };
 
+const inputs = { };
+const get = () => {
+};
+
 document.addEventListener('DOMContentLoaded', () => {
   const b = document.body;
   $(b,'h1').textContent = 'Readings';
@@ -175,7 +173,6 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   $(b,'h1').textContent = 'Control';
-  const all_inputs = [ ];
   for (const [name,items,one] of [
     ['Ceiling',[['light','Light'],['fan','Fan']],false],
     ['Thermostat',[['cool','Cool'],['heat','Heat']],true]
@@ -183,37 +180,80 @@ document.addEventListener('DOMContentLoaded', () => {
     const f = $(b,'fieldset');
     $(f,'legend').textContent = name;
     const t = $(f,'table');
-    const inputs = [ ];
+    const field_inputs = [ ];
     for (const [id,item] of items) {
       const tr = $(t,'tr');
       $(tr,'td').textContent = item+':';
       const s = $(tr,'td','label',['switch']);
-      inputs.push($(s,'input',{id, type:'checkbox', events: {
+      const input = $(s,'input',{id, type:'checkbox', events: {
         change: function(){
-          // for (const x of all_inputs) x.disabled = true;
-          // const cmd = { };
           const q = new URLSearchParams();
+          // const prev = { };
+          // const restore = () => {
+          //   for (const [key,val] of Object.entries(prev)) {
+          //     const x = inputs[key];
+          //     x.checked = val.checked;
+          //     $(x,[(val.on?'':'-')+'on']);
+          //   }
+          // };
+          const f = (x) => {
+            // prev[x.id] = {
+            //   checked: x.checked,
+            //   on: x.classList.contains('on')
+            // };
+            // $(x,['-on']);
+            q.set(x.id,x.checked?'1':'0');
+          };
           if (one) {
-            for (const x of inputs) {
+            for (const x of field_inputs) {
               if (x!==this) x.checked = false;
-              $(x,['-on']);
-              // cmd[x.id] = x.checked;
-              q.set(x.id,x.checked?'1':'0');
+              f(x);
             }
           } else {
-            $(this,['-on']);
-            // cmd[this.id] = this.checked;
-            q.set(this.id,this.checked?'1':'0');
+            f(this);
           }
-          console.log(q.toString());
+          // console.log(q.toString());
           // setTimeout(() => {
-          //   for (const x of all_inputs) x.disabled = false;
+          //   for (const x of inputs) x.disabled = false;
           // }, 1000);
+          fetch('set?'+q.toString(),{ referrer: '' })
+          .then(resp => resp.json())
+          .then(resp => {
+            if ('error' in resp) {
+              console.log(resp);
+              alert(resp.error);
+              get();
+            } else {
+              for (const [key,val] of Object.entries(resp)) {
+                const input = inputs[key];
+                if (input === undefined) continue;
+                switch (input.type) {
+                  case 'checkbox':
+                    if (input.checked = val) input.classList.add('on');
+                    else input.classList.remove('on');
+                    break;
+                  case 'text':
+                    input.value = val;
+                    break;
+                }
+              }
+            }
+          })
+          .catch(e => {
+            alert('Request failed');
+            get();
+            throw e;
+          });
+          /*
+          if (input.checked) input.classList.add('on');
+          else input.classList.remove('on');
+          */
         }
-      }}));
+      }});
+      field_inputs.push(input);
+      inputs[input.id] = input;
       $(s,'span',['slider']);
     }
-    all_inputs.push(...inputs);
   }
 });
 </script>
