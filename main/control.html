@@ -21,10 +21,12 @@ fieldset {
 fieldset > table { border-spacing: 0; }
 fieldset > table td {
   padding: 0.5em 0 0 0.25em;
+  text-align: right;
 }
 fieldset > table td:first-child {
   padding-left: 0;
   padding-right: 0.5em;
+  text-align: left;
 }
 fieldset > table tr:first-child > td { padding-top: 0; }
 
@@ -128,8 +130,6 @@ const $ = (p,...args) => {
   return p;
 };
 
-const T = { };
-
 const toggle = (id,val) => {
   const input = $id(id);
   if (input) {
@@ -138,9 +138,24 @@ const toggle = (id,val) => {
   }
 };
 
+let Tunit = 'F';
+const T = { };
+const setT = x => {
+  const t = T[x.id];
+  if (t===undefined) {
+    x.textContent = '??';
+  } else if (Tunit === 'F') {
+    x.textContent = t.toFixed(1);
+  } else {
+    x.textContent = ((t-32)*5/9).toFixed(1);
+  }
+  return x;
+};
+
 document.addEventListener('DOMContentLoaded', () => {
   const b = document.body;
 
+  const Ts = [ ];
   for (const [name,items] of [
     ['Temperature',[['Tm','Measured'],['Tt','Target']]]
   ]) {
@@ -150,9 +165,14 @@ document.addEventListener('DOMContentLoaded', () => {
     for (const [id,item] of items) {
       const tr = $(t,'tr');
       $(tr,'td').textContent = item+':';
-      $(tr,'td',['T'],{id}).textContent = '??';
-      $(tr,'td',['Tunit','click'],{ events: { click: function(){
-      }}}).textContent = '°F';
+      Ts.push( setT( $(tr,'td','span',['T'],{id}) ) );
+      $(tr,'td','span',['Tunit','click'],{ events: { click: function(){
+        Tunit = (Tunit==='F') ? 'C' : 'F';
+        for (const x of Ts) {
+          setT(x);
+          x.parentElement.nextElementSibling.children[0].textContent = '°'+Tunit;
+        }
+      }}}).textContent = '°'+Tunit;
     }
   }
 
