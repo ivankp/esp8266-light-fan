@@ -138,7 +138,7 @@ const toggle = (id,val) => {
   }
 };
 
-let Tunit = 'F';
+let Tunit;
 const T = { };
 const setT = x => {
   const t = T[x.id];
@@ -149,13 +149,13 @@ const setT = x => {
   } else {
     x.textContent = ((t-32)*5/9).toFixed(1);
   }
-  return x;
 };
 
 document.addEventListener('DOMContentLoaded', () => {
   const b = document.body;
 
-  const Ts = [ ];
+  Tunit = localStorage.getItem('Tunit') || 'F';
+  const Tvs = [ ], Tus = [ ];
   for (const [name,items] of [
     ['Temperature',[['Tm','Measured'],['Tt','Target']]]
   ]) {
@@ -165,14 +165,19 @@ document.addEventListener('DOMContentLoaded', () => {
     for (const [id,item] of items) {
       const tr = $(t,'tr');
       $(tr,'td').textContent = item+':';
-      Ts.push( setT( $(tr,'td','span',['T'],{id}) ) );
-      $(tr,'td','span',['Tunit','click'],{ events: { click: function(){
-        Tunit = (Tunit==='F') ? 'C' : 'F';
-        for (const x of Ts) {
-          setT(x);
-          x.parentElement.nextElementSibling.children[0].textContent = '°'+Tunit;
+      const Tv = $(tr,'td','span',['T'],{id});
+      setT(Tv);
+      Tvs.push(Tv);
+      const Tu = $(tr,'td','span',['Tunit','click'],{ events: {
+        click: function(){
+          Tunit = (Tunit==='F') ? 'C' : 'F';
+          localStorage.setItem('Tunit',Tunit);
+          for (const x of Tvs) setT(x);
+          for (const x of Tus) x.textContent = '°'+Tunit;
         }
-      }}}).textContent = '°'+Tunit;
+      }});
+      Tu.textContent = '°'+Tunit;
+      Tus.push(Tu);
     }
   }
 
@@ -243,6 +248,7 @@ document.addEventListener('DOMContentLoaded', () => {
       for (const [key,val] of Object.entries(resp)) {
         if (key[0]==='T') {
           T[key] = val;
+          setT($id(key));
         } else {
           toggle(key,val);
         }
