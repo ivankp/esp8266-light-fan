@@ -223,6 +223,8 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
               for (const [key,val] of Object.entries(resp))
                 toggle(key,val);
+              for (const x of modified)
+                if (!(x.id in resp)) x.checked = x.old;
             }
           })
           .catch(e => {
