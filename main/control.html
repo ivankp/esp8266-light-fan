@@ -14,16 +14,10 @@ body {
 
 .click { cursor: pointer; }
 
-h1 {
-  font-size: 1.25em;
-  font-weight: bold;
-  margin: 0.5em 0;
-}
 fieldset {
   border-radius: 0.5em;
   margin: 0.5em 0;
 }
-
 fieldset > table { border-spacing: 0; }
 fieldset > table td {
   padding: 0.5em 0 0 0.25em;
@@ -38,7 +32,6 @@ fieldset > table tr:first-child > td { padding-top: 0; }
   font-size: 1.05em;
   font-weight: bold;
 }
-
 .Tunit {
   font-size: 1.05em;
 }
@@ -49,7 +42,6 @@ fieldset > table tr:first-child > td { padding-top: 0; }
   width: 1.925em;
   height: 1em;
 }
-
 .switch {
   font-size: 1.2em;
 }
@@ -58,7 +50,6 @@ fieldset > table tr:first-child > td { padding-top: 0; }
   width: 0;
   height: 0;
 }
-
 .slider {
   position: absolute;
   cursor: pointer;
@@ -66,12 +57,11 @@ fieldset > table tr:first-child > td { padding-top: 0; }
   left: 0;
   right: 0;
   bottom: 0;
-  background-color: #ccc;
+  background-color: #CCC;
   -webkit-transition: .2s;
   transition: .2s;
   border-radius: 1em;
 }
-
 .slider:before {
   position: absolute;
   content: "";
@@ -84,29 +74,16 @@ fieldset > table tr:first-child > td { padding-top: 0; }
   transition: .2s;
   -webkit-transition: .2s;
 }
-
 input:checked + .slider:before {
   transform: translateX(0.9em);
   -webkit-transform: translateX(0.9em);
   -ms-transform: translateX(0.9em);
 }
-
-input#light.on:checked + .slider {
-  background-color: #FFAE27;
-}
-input#fan.on:checked + .slider {
-  background-color: #58B7EA;
-}
-input#cool.on:checked + .slider {
-  background-color: #1871E5;
-}
-input#heat.on:checked + .slider {
-  background-color: #F2403C;
-}
-
-input:disabled + .slider {
-  background-color: #eee;
-}
+input:disabled + .slider { background-color: #EEE; }
+input#light.on + .slider { background-color: #FFAE27; }
+input#fan.on   + .slider { background-color: #58B7EA; }
+input#cool.on  + .slider { background-color: #1871E5; }
+input#heat.on  + .slider { background-color: #F2403C; }
 
 </style>
 <script>
@@ -151,13 +128,9 @@ const $ = (p,...args) => {
   return p;
 };
 
-const inputs = { };
-const get = () => {
-};
-
 document.addEventListener('DOMContentLoaded', () => {
   const b = document.body;
-  $(b,'h1').textContent = 'Readings';
+
   for (const [name,items] of [
     ['Temperature',[['Tm','Measured'],['Tt','Target']]]
   ]) {
@@ -172,15 +145,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  $(b,'h1').textContent = 'Control';
   for (const [name,items,one] of [
-    ['Ceiling',[['light','Light'],['fan','Fan']],false],
-    ['Thermostat',[['cool','Cool'],['heat','Heat']],true]
+    ['Thermostat',[['cool','Cool'],['heat','Heat']],true],
+    ['Ceiling',[['light','Light'],['fan','Fan']]]
   ]) {
     const f = $(b,'fieldset');
     $(f,'legend').textContent = name;
     const t = $(f,'table');
-    const field_inputs = [ ];
+    const inputs = [ ];
     for (const [id,item] of items) {
       const tr = $(t,'tr');
       $(tr,'td').textContent = item+':';
@@ -188,70 +160,48 @@ document.addEventListener('DOMContentLoaded', () => {
       const input = $(s,'input',{id, type:'checkbox', events: {
         change: function(){
           const q = new URLSearchParams();
-          // const prev = { };
-          // const restore = () => {
-          //   for (const [key,val] of Object.entries(prev)) {
-          //     const x = inputs[key];
-          //     x.checked = val.checked;
-          //     $(x,[(val.on?'':'-')+'on']);
-          //   }
-          // };
-          const f = (x) => {
-            // prev[x.id] = {
-            //   checked: x.checked,
-            //   on: x.classList.contains('on')
-            // };
-            // $(x,['-on']);
-            q.set(x.id,x.checked?'1':'0');
+          const modified = [ ];
+          const restore = () => {
+            for (const x of modified)
+              x.checked = x.old;
+          };
+          const f = (input) => {
+            q.set(input.id,input.checked?'1':'0');
+            modified.push(input);
           };
           if (one) {
-            for (const x of field_inputs) {
+            for (const x of inputs) {
               if (x!==this) x.checked = false;
               f(x);
             }
           } else {
             f(this);
           }
-          // console.log(q.toString());
-          // setTimeout(() => {
-          //   for (const x of inputs) x.disabled = false;
-          // }, 1000);
           fetch('set?'+q.toString(),{ referrer: '' })
           .then(resp => resp.json())
           .then(resp => {
             if ('error' in resp) {
               console.log(resp);
               alert(resp.error);
-              get();
+              restore();
             } else {
               for (const [key,val] of Object.entries(resp)) {
-                const input = inputs[key];
-                if (input === undefined) continue;
-                switch (input.type) {
-                  case 'checkbox':
-                    if (input.checked = val) input.classList.add('on');
-                    else input.classList.remove('on');
-                    break;
-                  case 'text':
-                    input.value = val;
-                    break;
-                }
+                const input = $id(key);
+                if (!input) continue;
+                if (input.old = input.checked = val) input.classList.add('on');
+                else input.classList.remove('on');
               }
             }
           })
           .catch(e => {
             alert('Request failed');
-            get();
+            restore();
             throw e;
           });
-          /*
-          if (input.checked) input.classList.add('on');
-          else input.classList.remove('on');
-          */
         }
       }});
-      field_inputs.push(input);
-      inputs[input.id] = input;
+      inputs.push(input);
+      input.old = input.checked;
       $(s,'span',['slider']);
     }
   }
