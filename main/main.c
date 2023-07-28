@@ -27,6 +27,9 @@
 
 // #define FIELD_SIZE(t,f) (sizeof(((t*)0)->f))
 
+#define BUTTON_PIN 5
+#define LED_PIN 2
+
 #define SSID      "thermostat"
 #define PASS      "thermostat"
 #define MAX_CONN   8
@@ -55,6 +58,11 @@ extern const uint8_t control_html_end[] asm("_binary_min_control_html_gz_end");
 static char
   wifi_ssid[MAX_SSID_STRLEN+1] = { '\0' },
   wifi_pass[MAX_PASS_STRLEN+1] = { '\0' };
+
+// static_assert( sizeof(SSID) <= FIELD_SIZE(wifi_config_t,ap.ssid) );
+// static_assert( sizeof(PASS) <= FIELD_SIZE(wifi_config_t,ap.password) );
+// static_assert( sizeof(wifi_ssid) == FIELD_SIZE(wifi_config_t,sta.ssid) );
+// static_assert( sizeof(wifi_pass) == FIELD_SIZE(wifi_config_t,sta.password) );
 
 nvs_handle_t nvs;
 
@@ -88,105 +96,225 @@ err:
   ;
 }
 
-// static_assert( sizeof(SSID) <= FIELD_SIZE(wifi_config_t,ap.ssid) );
-// static_assert( sizeof(PASS) <= FIELD_SIZE(wifi_config_t,ap.password) );
-// static_assert( sizeof(wifi_ssid) == FIELD_SIZE(wifi_config_t,sta.ssid) );
-// static_assert( sizeof(wifi_pass) == FIELD_SIZE(wifi_config_t,sta.password) );
-
 void start_access_point(void);
 void start_station(void);
 
 static bool connected = false, new_ap = false;
 
-esp_err_t get_handler_thermostat(httpd_req_t* req) {
+esp_err_t get_root(httpd_req_t* req) {
   httpd_resp_set_hdr(req,"Content-Encoding","gzip");
-  httpd_resp_send(
-    req,
-    (const char*) control_html,
-    control_html_end-control_html
-  );
+  const char* buf;
+  size_t len;
+  if (connected) {
+    buf = (const char*) control_html;
+    len = control_html_end - control_html;
+  } else {
+    buf = (const char*) connect_html;
+    len = connect_html_end - connect_html;
+  }
+  httpd_resp_send(req,buf,len);
   return ESP_OK;
 }
+httpd_uri_t get_root_def = {
+  .uri       = "/",
+  .method    = HTTP_GET,
+  .handler   = get_root,
+  .user_ctx  = NULL
+};
 
-esp_err_t get_handler_connect(httpd_req_t* req) {
-  httpd_resp_set_hdr(req,"Content-Encoding","gzip");
-  httpd_resp_send(
-    req,
-    (const char*) connect_html,
-    connect_html_end-connect_html
-  );
-  return ESP_OK;
+esp_err_t get_get(httpd_req_t* req) {
+  if (connected) {
+    char buf[] = "{\"light\":L}";
+    *strchr(buf,'L') = '0' + (char)(!/*GPIO2*/gpio_get_level(LED_PIN));
+    httpd_resp_set_type(req,HTTPD_TYPE_JSON);
+    httpd_resp_send(req,buf,strlen(buf));
+    return ESP_OK;
+  } else {
+    return httpd_resp_send_404(req);
+  }
 }
+httpd_uri_t get_get_def = {
+  .uri       = "/get",
+  .method    = HTTP_GET,
+  .handler   = get_get,
+  .user_ctx  = NULL
+};
 
-esp_err_t post_handler_thermostat(httpd_req_t* req) {
-  return ESP_OK;
-}
+/*
+std::vector<std::pair<const char*,char*>>
+parse_query(const char* m) {
+  std::vector<std::pair<const char*,char*>> dict;
+  // if (!m || !*m) return dict;
+  if (!m) return dict;
+  while (*m == '&') ++m;
+  if (!*m) return dict;
+  dict.reserve(8);
 
-esp_err_t post_handler_connect(httpd_req_t* req) {
-  char buf[sizeof(wifi_ssid)+sizeof(wifi_pass)];
-  int remaining = req->content_len;
-
-  if (remaining > sizeof(buf))
-    return ESP_FAIL;
-
-  for (char *p = buf; remaining > 0;) {
-    const int ret = httpd_req_recv(req, p, remaining);
-    if (ret <= 0) { // Retry receiving if timeout occurred
-      if (ret == HTTPD_SOCK_ERR_TIMEOUT) continue;
-      return ESP_FAIL;
+  char *a=m, *b=m, *key = nullptr;
+  for (;;) {
+    const char c = *b;
+    if (c == '=' && !key) {
+      *b = '\0';
+      key = a;
+      a = ++b;
+    } else if (c == '&' || c == '\0') {
+      *b = '\0';
+      if (!key) { key = a; a = nullptr; }
+      dict.push_back({key,a});
+      if (c == '\0') break;
+      while (*++b == '&');
+      if (*b == '\0') break;
+      key = nullptr;
+      a = b;
+    } else {
+      ++b;
     }
-    p += ret;
-    remaining -= ret;
   }
 
-  char *a = buf;
-  char *b = memchr(a,'\0',sizeof(wifi_ssid));
-  if (!b) goto bad_ssid;
-  ++b;
-  const size_t ssid_len = b-a;
-  if (ssid_len < 3 || sizeof(wifi_ssid) < ssid_len) {
+  return dict;
+}
+*/
+
+esp_err_t get_set(httpd_req_t* req) {
+  if (connected) {
+    char buf[64] = "{";
+    size_t buf_len = 1;
+    const char* a = strchr(req->uri,'?');
+    if (!a || !*++a) goto send;
+    while (*a == '&') ++a;
+
+    const char *b=a, *key = NULL;
+    size_t key_len = 0;
+    for (;;) {
+      const char c = *b;
+      if (c == '=' && !key) {
+        key = a;
+        key_len = b-a;
+        a = ++b;
+      } else if (c == '&' || c == '\0') {
+
+#define KEYCMP(KEY) \
+        (key_len==(sizeof(KEY)-1) && !strncmp(key,KEY,key_len))
+#define KEYCPY(KEY) \
+        if (buf_len > 1) { buf[buf_len++] = ','; } \
+        strcpy(buf+buf_len,"\"" KEY "\":"); \
+        buf_len += sizeof("\"" KEY "\":")-1;
+
+
+        if (key) {
+          if (KEYCMP("light")) {
+            const int light = !!atoi(a);
+            gpio_set_level(LED_PIN, !/*GPIO2*/light);
+            KEYCPY("light")
+            buf[buf_len++] = '0' + (char)light;
+          }
+        }
+
+        if (c == '\0') break;
+        while (*++b == '&');
+        if (*b == '\0') break;
+        key = NULL;
+        a = b;
+      } else {
+        ++b;
+      }
+    }
+
+send:
+    buf[buf_len] = '}';
+    buf[++buf_len] = '\0';
+
+    httpd_resp_set_type(req,HTTPD_TYPE_JSON);
+    httpd_resp_send(req,buf,buf_len);
+    return ESP_OK;
+  } else {
+    return httpd_resp_send_404(req);
+  }
+}
+httpd_uri_t get_set_def = {
+  .uri       = "/set",
+  .method    = HTTP_GET,
+  .handler   = get_set,
+  .user_ctx  = NULL
+};
+
+esp_err_t post_root(httpd_req_t* req) {
+  if (connected) {
+    httpd_resp_set_status(req,"405 Method Not Allowed");
+    httpd_resp_send(req,"",0);
+    return ESP_OK;
+  } else {
+    char buf[sizeof(wifi_ssid)+sizeof(wifi_pass)];
+    int remaining = req->content_len;
+
+    if (remaining > sizeof(buf))
+      return ESP_FAIL;
+
+    for (char *p = buf; remaining > 0;) {
+      const int ret = httpd_req_recv(req, p, remaining);
+      if (ret <= 0) { // Retry receiving if timeout occurred
+        if (ret == HTTPD_SOCK_ERR_TIMEOUT) continue;
+        return ESP_FAIL;
+      }
+      p += ret;
+      remaining -= ret;
+    }
+
+    char *a = buf;
+    char *b = memchr(a,'\0',sizeof(wifi_ssid));
+    if (!b) goto bad_ssid;
+    ++b;
+    const size_t ssid_len = b-a;
+    if (ssid_len < 3 || sizeof(wifi_ssid) < ssid_len) {
 bad_ssid:
 #define RESPONSE "SSID must be 2 to " STR(MAX_SSID_STRLEN) " bytes long"
-    httpd_resp_set_status(req, "400 Bad Request");
-    httpd_resp_send(req, RESPONSE, sizeof(RESPONSE));
+      httpd_resp_set_status(req, "400 Bad Request");
+      httpd_resp_send(req, RESPONSE, sizeof(RESPONSE));
 #undef RESPONSE
-    return ESP_OK;
-  }
-  memset(wifi_ssid,0,MAX_SSID_STRLEN+1); // zero out
-  memcpy(wifi_ssid,a,ssid_len);
+      return ESP_OK;
+    }
+    memset(wifi_ssid,0,MAX_SSID_STRLEN+1); // zero out
+    memcpy(wifi_ssid,a,ssid_len);
 
-  a = b;
-  b = memchr(a,'\0',sizeof(wifi_pass));
-  if (!b) goto bad_pass;
-  ++b;
-  const size_t pass_len = b-a;
-  if (sizeof(wifi_pass) < pass_len) {
+    a = b;
+    b = memchr(a,'\0',sizeof(wifi_pass));
+    if (!b) goto bad_pass;
+    ++b;
+    const size_t pass_len = b-a;
+    if (sizeof(wifi_pass) < pass_len) {
 bad_pass:
 #define RESPONSE "Password must be at most " STR(MAX_PASS_STRLEN) " bytes long"
-    httpd_resp_set_status(req, "400 Bad Request");
-    httpd_resp_send(req, RESPONSE, sizeof(RESPONSE));
+      httpd_resp_set_status(req, "400 Bad Request");
+      httpd_resp_send(req, RESPONSE, sizeof(RESPONSE));
 #undef RESPONSE
-    return ESP_OK;
-  }
-  memset(wifi_pass,0,MAX_PASS_STRLEN+1); // zero out
-  memcpy(wifi_pass,a,pass_len);
-  new_ap = true;
+      return ESP_OK;
+    }
+    memset(wifi_pass,0,MAX_PASS_STRLEN+1); // zero out
+    memcpy(wifi_pass,a,pass_len);
+    new_ap = true;
 
 #define RESPONSE "Connecting to "
-  char resp[sizeof(RESPONSE)-1+sizeof(wifi_ssid)] = RESPONSE;
-  const size_t resp_len = sizeof(RESPONSE)-1 + ssid_len;
-  memcpy(resp+sizeof(RESPONSE)-1,wifi_ssid,ssid_len);
+    char resp[sizeof(RESPONSE)-1+sizeof(wifi_ssid)] = RESPONSE;
+    const size_t resp_len = sizeof(RESPONSE)-1 + ssid_len;
+    memcpy(resp+sizeof(RESPONSE)-1,wifi_ssid,ssid_len);
 #undef RESPONSE
 
-  httpd_resp_send(req, resp, resp_len);
+    httpd_resp_send(req, resp, resp_len);
 
-  esp_wifi_deauth_sta(0);
-  ESP_ERROR_CHECK(esp_wifi_stop());
+    esp_wifi_deauth_sta(0);
+    ESP_ERROR_CHECK(esp_wifi_stop());
 
-  start_station();
+    start_station();
 
-  return ESP_OK;
+    return ESP_OK;
+  }
 }
+httpd_uri_t post_root_def = {
+  .uri       = "/",
+  .method    = HTTP_POST,
+  .handler   = post_root,
+  .user_ctx  = NULL
+};
 
 /* static void wifi_event_handler( */
 /*   void* arg, */
@@ -361,45 +489,11 @@ void start_station(void) {
   }
 }
 
-esp_err_t get_handler(httpd_req_t* req) {
-  if (connected) {
-    return get_handler_thermostat(req);
-  } else {
-    return get_handler_connect(req);
-  }
-}
-esp_err_t post_handler(httpd_req_t* req) {
-  if (connected) {
-    return post_handler_thermostat(req);
-  } else {
-    return post_handler_connect(req);
-  }
-}
-httpd_uri_t get_handler_def = {
-  .uri       = "/",
-  .method    = HTTP_GET,
-  .handler   = get_handler,
-  .user_ctx  = NULL
-};
-httpd_uri_t post_handler_def = {
-  .uri       = "/",
-  .method    = HTTP_POST,
-  .handler   = post_handler,
-  .user_ctx  = NULL
-};
-
-#define BUTTON_PIN 5
-#define LED_PIN 2
-
 /* static xQueueHandle gpio_evt_queue = NULL; */
 /* static StaticTimer_t button_timer_buffer; */
 static TimerHandle_t
   button_debounce_timer = NULL,
   button_multiclick_timer = NULL;
-
-static volatile bool
-  relay_light = false,
-  relay_fan   = false;
 
 static volatile uint8_t
   button_click_count = 0;
@@ -415,10 +509,12 @@ static void button_debounce_timer_callback(void *arg) {
     button_click_count %= 3;
   }
 }
+static volatile bool relay_fan = false;
 static void button_multiclick_timer_callback(void *arg) {
   if (button_click_count == 1) {
-    gpio_set_level(LED_PIN, !/*GPIO2*/(relay_light = !relay_light));
-    printf("Light %s\n",(relay_light ? "ON" : "OFF"));
+    const int light = !gpio_get_level(LED_PIN);
+    gpio_set_level(LED_PIN, light);
+    printf("Light %s\n",(light ? "ON" : "OFF"));
   } else if (button_click_count == 2) {
     relay_fan = !relay_fan;
     printf("Fan %s\n",(relay_fan ? "ON" : "OFF"));
@@ -467,8 +563,10 @@ void app_main(void) {
   }
 
   // Set URI handlers
-  httpd_register_uri_handler(server, & get_handler_def);
-  httpd_register_uri_handler(server, &post_handler_def);
+  httpd_register_uri_handler(server, & get_root_def);
+  httpd_register_uri_handler(server, &post_root_def);
+  httpd_register_uri_handler(server, & get_get_def);
+  httpd_register_uri_handler(server, & get_set_def);
 
   // Start WiFi -----------------------------------------------------
   if (wifi_ssid[0]) start_station();
@@ -486,7 +584,7 @@ skip_wifi: ;
     };
     gpio_config(&io_conf);
   }
-  gpio_set_level(LED_PIN, !/*GPIO2*/relay_light);
+  gpio_set_level(LED_PIN, /*GPIO2*/1);
 
   { gpio_config_t io_conf = {
       .pin_bit_mask = (1ull << BUTTON_PIN), // GPIO pin
