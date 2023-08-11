@@ -1,8 +1,6 @@
 #include <string.h>
 
 #include "freertos/FreeRTOS.h"
-/* #include "freertos/task.h" */
-/* #include "freertos/queue.h" */
 #include "freertos/timers.h"
 #include "freertos/event_groups.h"
 
@@ -14,7 +12,6 @@
 #include "esp_event.h"
 #include "esp_http_server.h"
 #include "esp_timer.h"
-// #include "esp_log.h"
 
 #include "nvs.h"
 #include "nvs_flash.h"
@@ -58,11 +55,6 @@ extern const uint8_t control_html_end[] asm("_binary_min_control_html_gz_end");
 static char
   wifi_ssid[MAX_SSID_STRLEN+1] = { '\0' },
   wifi_pass[MAX_PASS_STRLEN+1] = { '\0' };
-
-// static_assert( sizeof(SSID) <= FIELD_SIZE(wifi_config_t,ap.ssid) );
-// static_assert( sizeof(PASS) <= FIELD_SIZE(wifi_config_t,ap.password) );
-// static_assert( sizeof(wifi_ssid) == FIELD_SIZE(wifi_config_t,sta.ssid) );
-// static_assert( sizeof(wifi_pass) == FIELD_SIZE(wifi_config_t,sta.password) );
 
 nvs_handle_t nvs;
 
@@ -139,41 +131,6 @@ httpd_uri_t get_get_def = {
   .handler   = get_get,
   .user_ctx  = NULL
 };
-
-/*
-std::vector<std::pair<const char*,char*>>
-parse_query(const char* m) {
-  std::vector<std::pair<const char*,char*>> dict;
-  // if (!m || !*m) return dict;
-  if (!m) return dict;
-  while (*m == '&') ++m;
-  if (!*m) return dict;
-  dict.reserve(8);
-
-  char *a=m, *b=m, *key = nullptr;
-  for (;;) {
-    const char c = *b;
-    if (c == '=' && !key) {
-      *b = '\0';
-      key = a;
-      a = ++b;
-    } else if (c == '&' || c == '\0') {
-      *b = '\0';
-      if (!key) { key = a; a = nullptr; }
-      dict.push_back({key,a});
-      if (c == '\0') break;
-      while (*++b == '&');
-      if (*b == '\0') break;
-      key = nullptr;
-      a = b;
-    } else {
-      ++b;
-    }
-  }
-
-  return dict;
-}
-*/
 
 esp_err_t get_set(httpd_req_t* req) {
   if (connected) {
@@ -316,31 +273,6 @@ httpd_uri_t post_root_def = {
   .user_ctx  = NULL
 };
 
-/* static void wifi_event_handler( */
-/*   void* arg, */
-/*   esp_event_base_t event_base, */
-/*   int32_t event_id, */
-/*   void* event_data */
-/* ) { */
-/*   if (event_id == WIFI_EVENT_AP_STACONNECTED) { */
-/*     wifi_event_ap_staconnected_t* event = */
-/*       (wifi_event_ap_staconnected_t*) event_data; */
-/*     printf( */
-/*       "station " MACSTR " join, AID=%d\n", */
-/*       MAC2STR(event->mac), */
-/*       event->aid */
-/*     ); */
-/*   } else if (event_id == WIFI_EVENT_AP_STADISCONNECTED) { */
-/*     wifi_event_ap_stadisconnected_t* event = */
-/*       (wifi_event_ap_stadisconnected_t*) event_data; */
-/*     printf( */
-/*       "station " MACSTR " leave, AID=%d\n", */
-/*       MAC2STR(event->mac), */
-/*       event->aid */
-/*     ); */
-/*   } */
-/* } */
-
 void start_access_point(void) {
   connected = false;
 
@@ -370,22 +302,6 @@ void start_access_point(void) {
   ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
   ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_AP, &wifi_config));
   ESP_ERROR_CHECK(esp_wifi_start());
-
-  /* puts( */
-  /*   "SSID: " SSID "\n" */
-  /*   "PASS: " PASS */
-  /* ); */
-
-  /* server = NULL; */
-  /* httpd_config_t config = HTTPD_DEFAULT_CONFIG(); */
-  /*  */
-  /* if (httpd_start(&server, &config) == ESP_OK) { */
-  /*   // Set URI handlers */
-  /*   httpd_register_uri_handler(server, &connect_get); */
-  /*   httpd_register_uri_handler(server, &connect_post); */
-  /* } else { */
-  /*   server = NULL; */
-  /* } */
 
   tcpip_adapter_ip_info_t ip_info;
   tcpip_adapter_get_ip_info(TCPIP_ADAPTER_IF_AP, &ip_info);
@@ -489,9 +405,6 @@ void start_station(void) {
   }
 }
 
-// static xQueueHandle gpio_evt_queue = NULL;
-// static StaticTimer_t button_timer_buffer;
-
 static TimerHandle_t
   button_debounce_timer = NULL,
   button_multiclick_timer = NULL;
@@ -523,55 +436,6 @@ static void button_multiclick_timer_callback(void *arg) {
   button_click_count = 0;
   // TODO: notify clients
 }
-
-/*
-static TimerHandle_t
-  button_debounce_timer = NULL,
-  button_multiclick_timer = NULL;
-
-static volatile uint8_t button_click_count = 0;
-
-// 0   1  2   3  4  5  6  7  8
-//    ┌──┐   ┌──┐  ┌──┐  ┌──┐
-//    │  │   │  │  │  │  │  │
-// ───┘  └───┘  └──┘  └──┘  └───
-
-static void button_isr(void *arg) { // trigger on both edges
-  // count % 2 == 0  :  trigger on  rising, untrigger on falling
-  // count % 2 == 1  :  trigger on falling, untrigger on rising
-
-  // edge == 0  :  isr triggered on falling
-  // edge == 1  :  isr triggered on rising
-
-  if ((button_click_count%2) != edge) {
-    // start jitter timer
-    BaseType_t xHigherPriorityTaskWoken = pdTRUE;
-    xTimerStartFromISR( button_debounce_timer, &xHigherPriorityTaskWoken );
-  }
-}
-
-static void button_debounce_timer_callback(void *arg) {
-  // switch interrupt edge
-  gpio_int_type_t* intr_type = &GPIO.pin[1ull << BUTTON_PIN].int_type;
-  int_type
-
-  if ((++button_click_count)%2) { // rising edge
-    // start multiclick timer
-    xTimerStart( button_multiclick_timer, 10 );
-  }
-}
-static volatile bool relay_fan = false;
-static void button_multiclick_timer_callback(void *arg) {
-  const uint8_t n = (button_click_count+1) >> 1; // number of rising edges
-  button_click_count = -(button_click_count%2); // ignore upcoming falling edge
-  if (n%2) { // single click
-    gpio_set_level(LED_PIN, !gpio_get_level(LED_PIN));
-  } else { // double click
-    relay_fan = !relay_fan;
-    printf("Fan %s\n",(relay_fan ? "ON" : "OFF"));
-  }
-}
-*/
 
 void app_main(void) {
   // HTTP ===========================================================
@@ -646,17 +510,12 @@ skip_wifi: ;
     gpio_config(&io_conf);
   }
 
-  // create event queue and task
-  /* gpio_evt_queue = xQueueCreate(8,sizeof(uint32_t)); */
-  /* xTaskCreate(button_task, "button_task", 2048, NULL, 10, NULL); */
-
   button_debounce_timer = xTimerCreate/*Static*/(
     "",
     10 / portTICK_PERIOD_MS, // period in ticks
     pdFALSE, // not periodic
     (void*) 0, // timer id
     button_debounce_timer_callback
-    /* &button_timer_buffer */
   );
   button_multiclick_timer = xTimerCreate/*Static*/(
     "",
@@ -664,7 +523,6 @@ skip_wifi: ;
     pdFALSE, // not periodic
     (void*) 0, // timer id
     button_multiclick_timer_callback
-    /* &button_timer_buffer */
   );
 
   // install gpio isr service
