@@ -489,8 +489,9 @@ void start_station(void) {
   }
 }
 
-/* static xQueueHandle gpio_evt_queue = NULL; */
-/* static StaticTimer_t button_timer_buffer; */
+// static xQueueHandle gpio_evt_queue = NULL;
+// static StaticTimer_t button_timer_buffer;
+
 static TimerHandle_t
   button_debounce_timer = NULL,
   button_multiclick_timer = NULL;
@@ -522,6 +523,55 @@ static void button_multiclick_timer_callback(void *arg) {
   button_click_count = 0;
   // TODO: notify clients
 }
+
+/*
+static TimerHandle_t
+  button_debounce_timer = NULL,
+  button_multiclick_timer = NULL;
+
+static volatile uint8_t button_click_count = 0;
+
+// 0   1  2   3  4  5  6  7  8
+//    ┌──┐   ┌──┐  ┌──┐  ┌──┐
+//    │  │   │  │  │  │  │  │
+// ───┘  └───┘  └──┘  └──┘  └───
+
+static void button_isr(void *arg) { // trigger on both edges
+  // count % 2 == 0  :  trigger on  rising, untrigger on falling
+  // count % 2 == 1  :  trigger on falling, untrigger on rising
+
+  // edge == 0  :  isr triggered on falling
+  // edge == 1  :  isr triggered on rising
+
+  if ((button_click_count%2) != edge) {
+    // start jitter timer
+    BaseType_t xHigherPriorityTaskWoken = pdTRUE;
+    xTimerStartFromISR( button_debounce_timer, &xHigherPriorityTaskWoken );
+  }
+}
+
+static void button_debounce_timer_callback(void *arg) {
+  // switch interrupt edge
+  gpio_int_type_t* intr_type = &GPIO.pin[1ull << BUTTON_PIN].int_type;
+  int_type
+
+  if ((++button_click_count)%2) { // rising edge
+    // start multiclick timer
+    xTimerStart( button_multiclick_timer, 10 );
+  }
+}
+static volatile bool relay_fan = false;
+static void button_multiclick_timer_callback(void *arg) {
+  const uint8_t n = (button_click_count+1) >> 1; // number of rising edges
+  button_click_count = -(button_click_count%2); // ignore upcoming falling edge
+  if (n%2) { // single click
+    gpio_set_level(LED_PIN, !gpio_get_level(LED_PIN));
+  } else { // double click
+    relay_fan = !relay_fan;
+    printf("Fan %s\n",(relay_fan ? "ON" : "OFF"));
+  }
+}
+*/
 
 void app_main(void) {
   // HTTP ===========================================================
@@ -577,10 +627,10 @@ skip_wifi: ;
   // GPIO ===========================================================
   { gpio_config_t io_conf = {
       .pin_bit_mask = (1ull << LED_PIN), // GPIO pin
-      .intr_type = GPIO_INTR_DISABLE, // no interrupt
       .mode = GPIO_MODE_OUTPUT,
-      .pull_up_en = 0,
-      .pull_down_en = 0
+      .pull_up_en = GPIO_PULLUP_DISABLE,
+      .pull_down_en = GPIO_PULLDOWN_DISABLE,
+      .intr_type = GPIO_INTR_DISABLE // no interrupt
     };
     gpio_config(&io_conf);
   }
@@ -588,10 +638,10 @@ skip_wifi: ;
 
   { gpio_config_t io_conf = {
       .pin_bit_mask = (1ull << BUTTON_PIN), // GPIO pin
-      .intr_type = GPIO_INTR_POSEDGE, // interrupt on rising edge
       .mode = GPIO_MODE_INPUT,
-      .pull_up_en = 0,
-      .pull_down_en = 1
+      .pull_up_en = GPIO_PULLUP_DISABLE,
+      .pull_down_en = GPIO_PULLDOWN_ENABLE,
+      .intr_type = GPIO_INTR_POSEDGE // interrupt on rising edge
     };
     gpio_config(&io_conf);
   }
@@ -602,7 +652,7 @@ skip_wifi: ;
 
   button_debounce_timer = xTimerCreate/*Static*/(
     "",
-    20 / portTICK_PERIOD_MS, // period in ticks
+    10 / portTICK_PERIOD_MS, // period in ticks
     pdFALSE, // not periodic
     (void*) 0, // timer id
     button_debounce_timer_callback
@@ -610,7 +660,7 @@ skip_wifi: ;
   );
   button_multiclick_timer = xTimerCreate/*Static*/(
     "",
-    300 / portTICK_PERIOD_MS, // period in ticks
+    150 / portTICK_PERIOD_MS, // period in ticks
     pdFALSE, // not periodic
     (void*) 0, // timer id
     button_multiclick_timer_callback
