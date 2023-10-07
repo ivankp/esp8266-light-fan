@@ -24,8 +24,10 @@
 
 // #define FIELD_SIZE(t,f) (sizeof(((t*)0)->f))
 
-#define BUTTON_PIN 5
 #define LED_PIN 2
+#define BUTTON_PIN 13
+#define LIGHT_PIN 5
+#define FAN_PIN 4
 
 #define SSID      "thermostat"
 #define PASS      "thermostat"
@@ -116,8 +118,9 @@ httpd_uri_t get_root_def = {
 
 esp_err_t get_get(httpd_req_t* req) {
   if (connected) {
-    char buf[] = "{\"light\":L}";
-    *strchr(buf,'L') = '0' + (char)(!/*GPIO2*/gpio_get_level(LED_PIN));
+    char buf[] = "{\"light\":L,\"fan\":F}";
+    *strchr(buf,'L') = '0' + (char)(gpio_get_level(LIGHT_PIN));
+    *strchr(buf,'F') = '0' + (char)(gpio_get_level(FAN_PIN));
     httpd_resp_set_type(req,HTTPD_TYPE_JSON);
     httpd_resp_send(req,buf,strlen(buf));
     return ESP_OK;
@@ -161,9 +164,21 @@ esp_err_t get_set(httpd_req_t* req) {
         if (key) {
           if (KEYCMP("light")) {
             const int light = !!atoi(a);
-            gpio_set_level(LED_PIN, !/*GPIO2*/light);
+            gpio_set_level(LIGHT_PIN, light);
             KEYCPY("light")
             buf[buf_len++] = '0' + (char)light;
+          } else
+          if (KEYCMP("fan")) {
+            const int fan = !!atoi(a);
+            gpio_set_level(FAN_PIN, fan);
+            KEYCPY("fan")
+            buf[buf_len++] = '0' + (char)fan;
+          } else
+          if (KEYCMP("led")) {
+            const int led = !!atoi(a);
+            gpio_set_level(LED_PIN, !/*inverted*/led);
+            KEYCPY("led")
+            buf[buf_len++] = '0' + (char)led;
           }
         }
 
@@ -425,14 +440,19 @@ static void button_debounce_timer_callback(void *arg) {
 }
 static volatile bool relay_fan = false;
 static void button_multiclick_timer_callback(void *arg) {
-  if (button_click_count == 1) {
-    const int light = !gpio_get_level(LED_PIN);
-    gpio_set_level(LED_PIN, light);
-    printf("Light %s\n",(light ? "ON" : "OFF"));
-  } else if (button_click_count == 2) {
-    relay_fan = !relay_fan;
-    printf("Fan %s\n",(relay_fan ? "ON" : "OFF"));
+  int pin;
+  switch (button_click_count) {
+    case 1:
+      pin = LIGHT_PIN;
+      break;
+    case 2:
+      pin = FAN_PIN;
+      break;
+    default:
+      goto end;
   }
+  gpio_set_level(pin, !gpio_get_level(pin));
+end:
   button_click_count = 0;
   // TODO: notify clients
 }
@@ -498,7 +518,29 @@ skip_wifi: ;
     };
     gpio_config(&io_conf);
   }
-  gpio_set_level(LED_PIN, /*GPIO2*/1);
+  gpio_set_level(LED_PIN, 1/*inverted*/);
+
+  { gpio_config_t io_conf = {
+      .pin_bit_mask = (1ull << LIGHT_PIN), // GPIO pin
+      .mode = GPIO_MODE_OUTPUT,
+      .pull_up_en = GPIO_PULLUP_DISABLE,
+      .pull_down_en = GPIO_PULLDOWN_DISABLE,
+      .intr_type = GPIO_INTR_DISABLE // no interrupt
+    };
+    gpio_config(&io_conf);
+  }
+  gpio_set_level(LIGHT_PIN, 0);
+
+  { gpio_config_t io_conf = {
+      .pin_bit_mask = (1ull << FAN_PIN), // GPIO pin
+      .mode = GPIO_MODE_OUTPUT,
+      .pull_up_en = GPIO_PULLUP_DISABLE,
+      .pull_down_en = GPIO_PULLDOWN_DISABLE,
+      .intr_type = GPIO_INTR_DISABLE // no interrupt
+    };
+    gpio_config(&io_conf);
+  }
+  gpio_set_level(FAN_PIN, 0);
 
   { gpio_config_t io_conf = {
       .pin_bit_mask = (1ull << BUTTON_PIN), // GPIO pin
