@@ -4,6 +4,7 @@
 #include "freertos/timers.h"
 #include "freertos/event_groups.h"
 
+// #include "esp8266/gpio_struct.h"
 #include "driver/gpio.h"
 
 #include "esp_system.h"
@@ -25,9 +26,10 @@
 // #define FIELD_SIZE(t,f) (sizeof(((t*)0)->f))
 
 #define LED_PIN 2
-#define BUTTON_PIN 13
 #define LIGHT_PIN 5
 #define FAN_PIN 4
+#define LIGHT_SWITCH_PIN 13
+#define FAN_SWITCH_PIN 14
 
 #define SSID      "thermostat"
 #define PASS      "thermostat"
@@ -420,41 +422,50 @@ void start_station(void) {
   }
 }
 
-static TimerHandle_t
-  button_debounce_timer = NULL,
-  button_multiclick_timer = NULL;
+static const int switch_pin[] = { LIGHT_SWITCH_PIN, FAN_SWITCH_PIN };
+static const int output_pin[] = { LIGHT_PIN, FAN_PIN };
+static volatile bool switch_enabled[] = { true, true };
+static TimerHandle_t switch_timer[] = { NULL, NULL };
 
-static volatile uint8_t
-  button_click_count = 0;
-
-static void button_isr(void *arg) {
-  BaseType_t xHigherPriorityTaskWoken = pdTRUE;
-  xTimerStartFromISR( button_debounce_timer, &xHigherPriorityTaskWoken );
-}
-static void button_debounce_timer_callback(void *arg) {
-  if (gpio_get_level(BUTTON_PIN)) { // if the input is still high
-    xTimerStart( button_multiclick_timer, 10 );
-    ++button_click_count;
-    button_click_count %= 3;
-  }
-}
-static volatile bool relay_fan = false;
-static void button_multiclick_timer_callback(void *arg) {
-  int pin;
-  switch (button_click_count) {
-    case 1:
-      pin = LIGHT_PIN;
-      break;
-    case 2:
-      pin = FAN_PIN;
-      break;
-    default:
-      goto end;
-  }
-  gpio_set_level(pin, !gpio_get_level(pin));
-end:
-  button_click_count = 0;
+static void switch_isr(void *arg) {
+  const int sw = (int)arg;
+  if (!switch_enabled[sw]) return;
+  // disable interrupt
+  switch_enabled[sw] = false;
+  gpio_set_intr_type(switch_pin[sw],GPIO_INTR_DISABLE);
+  // toggle pin level
+  const int out = output_pin[sw];
+  gpio_set_level(out, !gpio_get_level(out));
   // TODO: notify clients
+  // start timer
+  BaseType_t xHigherPriorityTaskWoken = pdTRUE;
+  xTimerStartFromISR( switch_timer[sw], &xHigherPriorityTaskWoken );
+}
+static void light_switch_timer_callback(void *arg) {
+  const int switch_level = gpio_get_level(LIGHT_SWITCH_PIN);
+  // set output pin level (what if switch was immediately flipped back?)
+  gpio_set_level(LIGHT_PIN, switch_level);
+  // TODO: notify clients
+  // enable interrupt
+  switch_enabled[0] = true;
+  gpio_set_intr_type(
+    LIGHT_SWITCH_PIN,
+    switch_level ? GPIO_INTR_NEGEDGE : GPIO_INTR_POSEDGE
+  );
+}
+static void fan_switch_timer_callback(void *arg) {
+  const int switch_level = gpio_get_level(FAN_SWITCH_PIN);
+  // set output pin level (what if switch was immediately flipped back?)
+  gpio_set_level(FAN_PIN, switch_level);
+  // TODO: notify clients
+  // enable interrupt
+  switch_enabled[1] = true;
+  gpio_set_intr_type(
+    FAN_SWITCH_PIN,
+    switch_level ? GPIO_INTR_NEGEDGE : GPIO_INTR_POSEDGE
+  );
+  // GPIO.pin[FAN_SWITCH_PIN].int_type =
+  //   switch_level ? GPIO_INTR_NEGEDGE : GPIO_INTR_POSEDGE;
 }
 
 void app_main(void) {
@@ -510,65 +521,53 @@ skip_wifi: ;
 
   // GPIO ===========================================================
   { gpio_config_t io_conf = {
-      .pin_bit_mask = (1ull << LED_PIN), // GPIO pin
       .mode = GPIO_MODE_OUTPUT,
       .pull_up_en = GPIO_PULLUP_DISABLE,
       .pull_down_en = GPIO_PULLDOWN_DISABLE,
-      .intr_type = GPIO_INTR_DISABLE // no interrupt
+      .intr_type = GPIO_INTR_DISABLE /* no interrupt */
     };
-    gpio_config(&io_conf);
-  }
-  gpio_set_level(LED_PIN, 1/*inverted*/);
 
-  { gpio_config_t io_conf = {
-      .pin_bit_mask = (1ull << LIGHT_PIN), // GPIO pin
-      .mode = GPIO_MODE_OUTPUT,
-      .pull_up_en = GPIO_PULLUP_DISABLE,
-      .pull_down_en = GPIO_PULLDOWN_DISABLE,
-      .intr_type = GPIO_INTR_DISABLE // no interrupt
-    };
-    gpio_config(&io_conf);
-  }
-  gpio_set_level(LIGHT_PIN, 0);
+#define OUTPUT_PIN(PIN,VAL) \
+    io_conf.pin_bit_mask = (1ull << PIN); /* GPIO pin */ \
+    gpio_config(&io_conf); \
+    gpio_set_level(PIN, VAL);
 
-  { gpio_config_t io_conf = {
-      .pin_bit_mask = (1ull << FAN_PIN), // GPIO pin
-      .mode = GPIO_MODE_OUTPUT,
-      .pull_up_en = GPIO_PULLUP_DISABLE,
-      .pull_down_en = GPIO_PULLDOWN_DISABLE,
-      .intr_type = GPIO_INTR_DISABLE // no interrupt
-    };
-    gpio_config(&io_conf);
-  }
-  gpio_set_level(FAN_PIN, 0);
+    OUTPUT_PIN(  LED_PIN, 1/*inverted*/)
+    OUTPUT_PIN(LIGHT_PIN, 0)
+    OUTPUT_PIN(  FAN_PIN, 0)
 
-  { gpio_config_t io_conf = {
-      .pin_bit_mask = (1ull << BUTTON_PIN), // GPIO pin
-      .mode = GPIO_MODE_INPUT,
-      .pull_up_en = GPIO_PULLUP_DISABLE,
-      .pull_down_en = GPIO_PULLDOWN_ENABLE,
-      .intr_type = GPIO_INTR_POSEDGE // interrupt on rising edge
-    };
+    io_conf.mode = GPIO_MODE_INPUT;
+    io_conf.intr_type = GPIO_INTR_DISABLE; /* interrupt edge */
+
+#define INPUT_PIN(PIN) \
+    io_conf.pin_bit_mask = (1ull << PIN); /* GPIO pin */ \
     gpio_config(&io_conf);
+
+    INPUT_PIN(LIGHT_SWITCH_PIN)
+    INPUT_PIN(  FAN_SWITCH_PIN)
   }
 
-  button_debounce_timer = xTimerCreate/*Static*/(
+  switch_timer[0] = xTimerCreate/*Static*/(
     "",
-    10 / portTICK_PERIOD_MS, // period in ticks
+    250 / portTICK_PERIOD_MS, // period in ticks
     pdFALSE, // not periodic
     (void*) 0, // timer id
-    button_debounce_timer_callback
+    light_switch_timer_callback
   );
-  button_multiclick_timer = xTimerCreate/*Static*/(
+  switch_timer[1] = xTimerCreate/*Static*/(
     "",
-    150 / portTICK_PERIOD_MS, // period in ticks
+    250 / portTICK_PERIOD_MS, // period in ticks
     pdFALSE, // not periodic
     (void*) 0, // timer id
-    button_multiclick_timer_callback
+    fan_switch_timer_callback
   );
 
   // install gpio isr service
   gpio_install_isr_service(0);
-  // hook isr handler for specific gpio pin
-  gpio_isr_handler_add(BUTTON_PIN, button_isr, (void*)BUTTON_PIN);
+  // hook isr handlers for specific gpio pins
+  gpio_isr_handler_add(LIGHT_SWITCH_PIN, switch_isr, (void*)0);
+  gpio_isr_handler_add(  FAN_SWITCH_PIN, switch_isr, (void*)1);
+
+  gpio_set_intr_type(LIGHT_SWITCH_PIN,GPIO_INTR_POSEDGE);
+  gpio_set_intr_type(  FAN_SWITCH_PIN,GPIO_INTR_POSEDGE);
 }
