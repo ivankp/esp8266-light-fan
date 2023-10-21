@@ -422,50 +422,38 @@ void start_station(void) {
   }
 }
 
-static const int switch_pin[] = { LIGHT_SWITCH_PIN, FAN_SWITCH_PIN };
+// static const int switch_pin[] = { LIGHT_SWITCH_PIN, FAN_SWITCH_PIN };
 static const int output_pin[] = { LIGHT_PIN, FAN_PIN };
-static volatile bool switch_enabled[] = { true, true };
+static volatile int switch_state[] = { 0, 0 };
+static volatile bool switch_enable[] = { true, true };
 static TimerHandle_t switch_timer[] = { NULL, NULL };
 
 static void switch_isr(void *arg) {
-  const int sw = (int)arg;
-  if (!switch_enabled[sw]) return;
-  // disable interrupt
-  switch_enabled[sw] = false;
-  gpio_set_intr_type(switch_pin[sw],GPIO_INTR_DISABLE);
-  // toggle pin level
-  const int out = output_pin[sw];
-  gpio_set_level(out, !gpio_get_level(out));
-  // TODO: notify clients
+  const int i = (int)arg;
+  if (!switch_enable[i]) {
+    switch_enable[i] = false;
+    // set output pin level
+    gpio_set_level(output_pin[i], (switch_state[i] = !switch_state[i]));
+  }
   // start timer
   BaseType_t xHigherPriorityTaskWoken = pdTRUE;
-  xTimerStartFromISR( switch_timer[sw], &xHigherPriorityTaskWoken );
+  xTimerStartFromISR( switch_timer[i], &xHigherPriorityTaskWoken );
 }
 static void light_switch_timer_callback(void *arg) {
-  const int switch_level = gpio_get_level(LIGHT_SWITCH_PIN);
-  // set output pin level (what if switch was immediately flipped back?)
-  gpio_set_level(LIGHT_PIN, switch_level);
+  // set output pin level
+  gpio_set_level(LIGHT_PIN,
+    (switch_state[0] = gpio_get_level(LIGHT_SWITCH_PIN)));
+  // enable switch
+  switch_enable[0] = true;
   // TODO: notify clients
-  // enable interrupt
-  switch_enabled[0] = true;
-  gpio_set_intr_type(
-    LIGHT_SWITCH_PIN,
-    switch_level ? GPIO_INTR_NEGEDGE : GPIO_INTR_POSEDGE
-  );
 }
 static void fan_switch_timer_callback(void *arg) {
-  const int switch_level = gpio_get_level(FAN_SWITCH_PIN);
-  // set output pin level (what if switch was immediately flipped back?)
-  gpio_set_level(FAN_PIN, switch_level);
+  // set output pin level
+  gpio_set_level(FAN_PIN,
+    (switch_state[1] = gpio_get_level(FAN_SWITCH_PIN)));
+  // enable switch
+  switch_enable[1] = true;
   // TODO: notify clients
-  // enable interrupt
-  switch_enabled[1] = true;
-  gpio_set_intr_type(
-    FAN_SWITCH_PIN,
-    switch_level ? GPIO_INTR_NEGEDGE : GPIO_INTR_POSEDGE
-  );
-  // GPIO.pin[FAN_SWITCH_PIN].int_type =
-  //   switch_level ? GPIO_INTR_NEGEDGE : GPIO_INTR_POSEDGE;
 }
 
 void app_main(void) {
@@ -549,14 +537,14 @@ skip_wifi: ;
 
   switch_timer[0] = xTimerCreate/*Static*/(
     "",
-    250 / portTICK_PERIOD_MS, // period in ticks
+    50 / portTICK_PERIOD_MS, // period in ticks
     pdFALSE, // not periodic
     (void*) 0, // timer id
     light_switch_timer_callback
   );
   switch_timer[1] = xTimerCreate/*Static*/(
     "",
-    250 / portTICK_PERIOD_MS, // period in ticks
+    50 / portTICK_PERIOD_MS, // period in ticks
     pdFALSE, // not periodic
     (void*) 0, // timer id
     fan_switch_timer_callback
@@ -568,6 +556,6 @@ skip_wifi: ;
   gpio_isr_handler_add(LIGHT_SWITCH_PIN, switch_isr, (void*)0);
   gpio_isr_handler_add(  FAN_SWITCH_PIN, switch_isr, (void*)1);
 
-  gpio_set_intr_type(LIGHT_SWITCH_PIN,GPIO_INTR_POSEDGE);
-  gpio_set_intr_type(  FAN_SWITCH_PIN,GPIO_INTR_POSEDGE);
+  gpio_set_intr_type(LIGHT_SWITCH_PIN,GPIO_INTR_ANYEDGE);
+  gpio_set_intr_type(  FAN_SWITCH_PIN,GPIO_INTR_ANYEDGE);
 }
