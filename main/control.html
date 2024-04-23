@@ -89,18 +89,12 @@ input#heat.on  + .slider { background-color: #F2403C; }
 
 </style>
 <script>
-const $id = id => document.getElementById(id);
-
 const $ = (p,...args) => {
   if (p===null) {
     const x = args.shift();
     p = document.createElement(x);
   } else if (p.constructor === String) {
-    p = (
-      args[0] instanceof Element ? args.shift() : document.body
-    ).querySelector(p);
-  } else if (p.constructor === Array) {
-    return p.map(x => $(x,...args));
+    p = document.getElementById(p);
   }
   for (let x of args) {
     if (x.constructor === String) {
@@ -131,7 +125,7 @@ const $ = (p,...args) => {
 };
 
 const toggle = (id,val) => {
-  const input = $id(id);
+  const input = $(id);
   if (input) {
     if (input.old = input.checked = val) input.classList.add('on');
     else input.classList.remove('on');
@@ -250,7 +244,7 @@ document.addEventListener('DOMContentLoaded', () => {
       for (const [key,val] of Object.entries(resp)) {
         if (key[0]==='T') {
           T[key] = val;
-          setT($id(key));
+          setT($(key));
         } else {
           toggle(key,val);
         }

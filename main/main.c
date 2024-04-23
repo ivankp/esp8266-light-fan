@@ -35,14 +35,11 @@
 #define PASS      "thermostat"
 #define MAX_CONN   8
 
-#define WIFI_CONNECTED_BIT BIT0
-#define WIFI_FAIL_BIT      BIT1
-
 // AP = access point
 // STA = station
 // stations connect to an access point
 
-// default IP address: 192.168.4.1
+// default AP IP address: 192.168.4.1
 
 static httpd_handle_t server = NULL;
 
@@ -92,10 +89,11 @@ err:
   ;
 }
 
+static bool new_ap = false;
+static int connected = 0;
+
 void start_access_point(void);
 void start_station(void);
-
-static bool connected = false, new_ap = false;
 
 esp_err_t get_root(httpd_req_t* req) {
   httpd_resp_set_hdr(req,"Content-Encoding","gzip");
@@ -291,7 +289,7 @@ httpd_uri_t post_root_def = {
 };
 
 void start_access_point(void) {
-  connected = false;
+  connected = 0;
 
   wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
   ESP_ERROR_CHECK(esp_wifi_init(&cfg));
@@ -322,11 +320,22 @@ void start_access_point(void) {
 
   tcpip_adapter_ip_info_t ip_info;
   tcpip_adapter_get_ip_info(TCPIP_ADAPTER_IF_AP, &ip_info);
+
+  puts("Access point IP address");
   puts(ip4addr_ntoa(&ip_info.ip));
 }
 
-static EventGroupHandle_t s_wifi_event_group;
-static int s_retry_num = 0;
+// https://docs.espressif.com/projects/esp-idf/en/v4.0.3/api-reference/network/esp_wifi.html
+// https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-guides/wifi.html
+
+#define WIFI_CONNECTED_BIT BIT0
+#define WIFI_FAIL_BIT      BIT1
+
+static TimerHandle_t station_reconnect_timer = NULL;
+
+static void station_reconnect_timer_callback(void *arg) {
+  esp_wifi_connect();
+}
 
 static void station_event_handler(
   void* arg,
@@ -334,30 +343,68 @@ static void station_event_handler(
   int32_t event_id,
   void* event_data
 ) {
-  if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
-    esp_wifi_connect();
-  } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
-    if (s_retry_num < 5) { // number of retries
+  static int attempt = 0;
+  if (event_base == WIFI_EVENT) {
+    if (event_id == WIFI_EVENT_STA_START) {
       esp_wifi_connect();
-      s_retry_num++;
-      puts("Retrying AP connection");
-    } else {
-      xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
+    } else if (event_id == WIFI_EVENT_STA_DISCONNECTED) {
+      if (attempt < 5) { // max consecutive attempts
+        ++attempt;
+        puts("Retrying AP connection");
+        esp_wifi_connect();
+        // WIFI_EVENT_STA_DISCONNECTED is triggered by esp_wifi_connect()
+        // if it fails
+      } else {
+        attempt = 0;
+        puts("AP connection failed");
+        if (--connected <= 0) {
+          if (station_reconnect_timer)
+            xTimerDelete(station_reconnect_timer, 0);
+
+          ESP_ERROR_CHECK(esp_event_handler_unregister(
+            IP_EVENT, IP_EVENT_STA_GOT_IP, &station_event_handler
+          ));
+          ESP_ERROR_CHECK(esp_event_handler_unregister(
+            WIFI_EVENT, ESP_EVENT_ANY_ID, &station_event_handler
+          ));
+
+          // Switch back to AP mode if connection failed
+          ESP_ERROR_CHECK(esp_wifi_stop());
+          start_access_point();
+        } else {
+          puts("Attempting to reconnect in 1 minute");
+          if (!station_reconnect_timer) {
+            station_reconnect_timer = xTimerCreate/*Static*/(
+              "",
+              60000 / portTICK_PERIOD_MS, // period in ticks
+              pdFALSE, // not periodic
+              (void*) 0, // timer id
+              station_reconnect_timer_callback
+            );
+          }
+          xTimerStart(station_reconnect_timer, 0);
+        }
+      }
     }
-    puts("AP connection failed");
-  } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
-    ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
-    s_retry_num = 0;
-    xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
-    puts("AP connection succeeded");
-    puts(ip4addr_ntoa(&event->ip_info.ip));
+  } else if (event_base == IP_EVENT) {
+    if (event_id == IP_EVENT_STA_GOT_IP) {
+      attempt = 0;
+      connected = 8;
+
+      ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
+      puts("Obtained IP address");
+      puts(ip4addr_ntoa(&event->ip_info.ip));
+
+      if (new_ap) {
+        new_ap = false;
+        nvs_set_ssid_pass();
+      }
+    }
   }
 }
 
 void start_station(void) {
-  connected = true;
-
-  s_wifi_event_group = xEventGroupCreate();
+  connected = 1;
 
   wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
   ESP_ERROR_CHECK(esp_wifi_init(&cfg));
@@ -380,46 +427,7 @@ void start_station(void) {
 
   ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA) );
   ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config) );
-  ESP_ERROR_CHECK(esp_wifi_start() );
-
-  // Waiting until either the connection is established (WIFI_CONNECTED_BIT) or
-  // connection failed for the maximum number of re-tries (WIFI_FAIL_BIT). The
-  // bits are set by station_event_handler() (see above)
-  EventBits_t bits = xEventGroupWaitBits(
-    s_wifi_event_group,
-    WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
-    pdFALSE,
-    pdFALSE,
-    portMAX_DELAY
-  );
-
-  // xEventGroupWaitBits() returns the bits before the call returned, hence we
-  // can test which event actually happened.
-  if (bits & WIFI_CONNECTED_BIT) {
-    puts("Connected to AP");
-  } else if (bits & WIFI_FAIL_BIT) {
-    puts("Failed to connect to AP");
-  } else {
-    puts("Unexpected WiFi connection event");
-  }
-
-  ESP_ERROR_CHECK(esp_event_handler_unregister(
-    IP_EVENT, IP_EVENT_STA_GOT_IP, &station_event_handler
-  ));
-  ESP_ERROR_CHECK(esp_event_handler_unregister(
-    WIFI_EVENT, ESP_EVENT_ANY_ID, &station_event_handler
-  ));
-
-  vEventGroupDelete(s_wifi_event_group);
-
-  // Switch back to AP mode if connection failed
-  if (bits & WIFI_FAIL_BIT) {
-    ESP_ERROR_CHECK(esp_wifi_stop());
-    start_access_point();
-  } else if (new_ap) {
-    new_ap = false;
-    nvs_set_ssid_pass();
-  }
+  ESP_ERROR_CHECK(esp_wifi_start());
 }
 
 // static const int switch_pin[] = { LIGHT_SWITCH_PIN, FAN_SWITCH_PIN };
@@ -430,7 +438,7 @@ static TimerHandle_t switch_timer[] = { NULL, NULL };
 
 static void switch_isr(void *arg) {
   const int i = (int)arg;
-  if (!switch_enable[i]) {
+  if (switch_enable[i]) {
     switch_enable[i] = false;
     // set output pin level
     gpio_set_level(output_pin[i], (switch_state[i] = !switch_state[i]));
