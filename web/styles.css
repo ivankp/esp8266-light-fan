@@ -1,0 +1,86 @@
+body {
+  margin: 0.5em;
+  font-size: 1.25em;
+  font-family: sans-serif;
+  display: flex;
+  gap: 0.5em;
+}
+
+.click { cursor: pointer; }
+
+body > div:first-child {
+  flex: 1 100%;
+}
+
+svg.wifi > circle { fill: red; }
+svg.wifi > path { stroke: red; }
+svg.wifi.on > circle { fill: green; }
+svg.wifi.on > path { stroke: green; }
+svg.wifi:hover > circle { fill: blue; }
+svg.wifi:hover > path { stroke: blue; }
+
+fieldset {
+  border-radius: 0.5em;
+  margin: 0.5em 0;
+}
+fieldset:first-child {
+  margin-top: 0;
+}
+fieldset > table { border-spacing: 0; }
+fieldset > table td {
+  padding: 0.5em 0 0 0.25em;
+  text-align: right;
+}
+fieldset > table td:first-child {
+  padding-left: 0;
+  padding-right: 0.5em;
+  text-align: left;
+}
+fieldset > table tr:first-child > td { padding-top: 0; }
+
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 1.925em;
+  height: 1em;
+}
+.switch {
+  font-size: 1.2em;
+}
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #CCC;
+  transition: .2s;
+  -webkit-transition: .2s;
+  border-radius: 1em;
+}
+.slider:before {
+  position: absolute;
+  content: "";
+  height: 0.65em;
+  width: 0.65em;
+  left: 0.195em;
+  bottom: 0.175em;
+  border-radius: 50%;
+  background-color: white;
+  transition: .2s;
+  -webkit-transition: .2s;
+}
+input:checked + .slider:before {
+  transform: translateX(0.9em);
+  -webkit-transform: translateX(0.9em);
+  -ms-transform: translateX(0.9em);
+}
+input:disabled + .slider { background-color: #EEE; }
+input#light.on + .slider { background-color: #FFAE27; }
+input#fan.on   + .slider { background-color: #58B7EA; }

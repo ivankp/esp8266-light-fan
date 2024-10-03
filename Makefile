@@ -3,7 +3,7 @@
 # project subdirectory.
 #
 
-PROJECT_NAME := access-point
+PROJECT_NAME := light-and-fan
 
 include $(IDF_PATH)/make/project.mk
 
