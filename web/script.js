@@ -1,9 +1,10 @@
 const $ = (p,...args) => {
-  if (p===null) {
-    const x = args.shift();
-    p = document.createElement(x);
-  } else if (p.constructor === String) {
-    p = document.getElementById(p);
+  if (p.constructor === String) {
+    if (p[0]==='#') {
+      p = document.getElementById(p.substring(1));
+    } else {
+      return x => $(x, p, ...args);
+    }
   }
   for (let x of args) {
     if (x.constructor === String) {
@@ -12,10 +13,12 @@ const $ = (p,...args) => {
         : document.createElement(x)
       );
     } else if (x.nodeType === Node.ELEMENT_NODE) {
-      p = p.appendChild(x);
+      p.appendChild(x);
     } else if (x.constructor === Array) {
       for (let c of x)
         p.classList.add(c);
+    } else if (x.constructor === Function) {
+      x(p);
     } else if (x.constructor === Object) {
       for (const [key,val] of Object.entries(x)) {
         if (key==='style') {
@@ -28,6 +31,8 @@ const $ = (p,...args) => {
             if (v!==null) p.addEventListener(k,v);
             else p.removeEventListener(k);
           }
+        } else if (key==='text') {
+          p.textContent = val;
         } else {
           if (val!==null) {
             if (p instanceof SVGElement)
@@ -60,7 +65,7 @@ const toggle = (id,val) => {
 };
 
 document.addEventListener('DOMContentLoaded', () => {
-  const div1 = $(document.body, 'div');
+  const div1 = $('#main', 'div');
 
   for (const [section, id_name, one] of [
     // ['Thermostat',[['cool','Cool'],['heat','Heat']],true],
@@ -126,11 +131,26 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  const div2 = $(document.body, 'div');
+  const div2 = $('#main', 'div');
   const wifi = $(div2, 'span', ['click'], { events: {
     click: () => {
+      $('#main', ['inactive']);
+      $(document.body,
+        $('div', { id: 'overlay' }),
+        $('div', { id: 'prompt' }, 'form',
+          $('label',
+            $('span', { text: 'SSID: ' }),
+            $('input', { type: 'text', name: 'ssid' })
+          ),
+          $('label',
+            $('span', { text: 'PASS: ' }),
+            $('input', { type: 'password', name: 'pass' })
+          ),
+          $('input', { type: 'submit', value: 'Connect' })
+        )
+      );
     }
-  }}, 'svg', { id: 'wifi', viewBox: '-10.192 -14 20.385 16', height: '1em' });
+  }}, 'svg', { id: 'wifi', viewBox: '-10.192 -14 20.385 16' });
   $(wifi, 'circle', { r: 2, stroke: 'none' });
   $(wifi, 'path', {
     fill: 'none', 'stroke-linecap': 'round', 'stroke-width': 2,

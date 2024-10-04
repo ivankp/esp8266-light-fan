@@ -1,23 +1,43 @@
 body {
-  margin: 0.5em;
+  margin: 0;
   font-size: 1.25em;
   font-family: sans-serif;
-  display: flex;
-  gap: 0.5em;
 }
 
 .click { cursor: pointer; }
 
-body > div:first-child {
+#main {
+  margin: 0.5em;
+  display: flex;
+  gap: 0.5em;
+}
+#main > div:first-child {
   flex: 1 100%;
 }
 
-#wifi circle { fill: red; }
-#wifi path { stroke: red; }
-#wifi.on circle { fill: green; }
-#wifi.on path { stroke: green; }
-#wifi:hover circle { fill: blue; }
-#wifi:hover path { stroke: blue; }
+#main.inactive {
+  overflow: hidden;
+  user-select: none;
+}
+#overlay {
+  position: absolute;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  background-color: #000;
+  opacity: 0.5;
+}
+#prompt {
+  position: absolute;
+  left: 0;
+  right: 0;
+  margin-inline: auto;
+  width: fit-content;
+  background-color: #fff;
+}
+form span {
+  font-family: monospace;
+}
 
 fieldset {
   border-radius: 0.5em;
@@ -84,3 +104,11 @@ input:checked + .slider:before {
 input:disabled + .slider { background-color: #EEE; }
 input#light.on + .slider { background-color: #FFAE27; }
 input#fan.on   + .slider { background-color: #58B7EA; }
+
+#wifi { width: 1.5em; }
+#wifi circle { fill: red; }
+#wifi path { stroke: red; }
+#wifi.on circle { fill: green; }
+#wifi.on path { stroke: green; }
+#wifi:hover circle { fill: blue; }
+#wifi:hover path { stroke: blue; }
