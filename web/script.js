@@ -47,8 +47,6 @@ const $ = (p,...args) => {
   return p;
 };
 
-const clone = x => x.parentElement.appendChild(x.cloneNode());
-
 const all_inputs = { };
 
 const toggle = (id,val) => {
@@ -132,17 +130,11 @@ document.addEventListener('DOMContentLoaded', () => {
   const wifi = $(div2, 'span', ['click'], { events: {
     click: () => {
     }
-  }}, 'svg', ['wifi'], { viewBox: '-10.192 -14 20.385 16', height: '1em' });
+  }}, 'svg', { id: 'wifi', viewBox: '-10.192 -14 20.385 16', height: '1em' });
   $(wifi, 'circle', { r: 2, stroke: 'none' });
-  $(clone(
-  $(clone(
   $(wifi, 'path', {
     fill: 'none', 'stroke-linecap': 'round', 'stroke-width': 2,
-    d: 'M -3.536 -3.536 A 5 5 0 0 1 3.536 -3.536'
-  })), {
-    d: 'M -6.364 -6.364 A 9 9 0 0 1 6.364 -6.364'
-  })), {
-    d: 'M -9.192 -9.192 A 13 13 0 0 1 9.192 -9.192'
+    d: 'M-3.536-3.536a5 5 0 0 1 7.072 0M-6.364-6.364a9 9 0 0 1 12.728 0M-9.192-9.192a13 13 0 0 1 18.384 0'
   });
 
 

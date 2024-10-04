@@ -12,12 +12,12 @@ body > div:first-child {
   flex: 1 100%;
 }
 
-svg.wifi > circle { fill: red; }
-svg.wifi > path { stroke: red; }
-svg.wifi.on > circle { fill: green; }
-svg.wifi.on > path { stroke: green; }
-svg.wifi:hover > circle { fill: blue; }
-svg.wifi:hover > path { stroke: blue; }
+#wifi circle { fill: red; }
+#wifi path { stroke: red; }
+#wifi.on circle { fill: green; }
+#wifi.on path { stroke: green; }
+#wifi:hover circle { fill: blue; }
+#wifi:hover path { stroke: blue; }
 
 fieldset {
   border-radius: 0.5em;
