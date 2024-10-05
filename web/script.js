@@ -62,19 +62,44 @@ const toggle = (id,val) => {
 
 let overlay = null;
 const rmOverlay = () => {
-  if (overlay !== null) {
-    overlay.remove();
-    overlay = null;
-    $('main').classList.remove('inactive');
-  }
+  overlay.remove();
+  overlay = null;
+  $('main').classList.remove('inactive');
 };
 
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') rmOverlay();
+  if (overlay !== null && e.key === 'Escape') rmOverlay();
 });
 
 document.addEventListener('DOMContentLoaded', () => {
   const div1 = $('main', 'div');
+
+  $('main', 'div',
+    'span', ['click'], { events: {
+      click: () => {
+        $('main', ['inactive']);
+        $(document.body, 'div', x => overlay = x,
+          $$('div', { id: 'overlay' }),
+          'div', { id: 'prompt' }, 'form',
+            $$('label',
+              $$('span', { text: 'SSID:' }),
+              'input', { type: 'text', name: 'ssid' }, x => x.focus(),
+            ),
+            $$('label',
+              $$('span', { text: 'PASS:' }),
+              'input', { type: 'password', name: 'pass' }
+            ),
+            $$('input', { type: 'submit', value: 'Connect' }),
+            'div', ['close', 'click'], { text: 'x', events: { click: rmOverlay }}
+        );
+      }
+    }}, 'svg', { id: 'wifi', viewBox: '-10.192 -14 20.385 16' },
+      $$('circle', { r: 2, stroke: 'none' }),
+      'path', {
+        fill: 'none', 'stroke-linecap': 'round', 'stroke-width': 2,
+        d: 'M-3.536-3.536a5 5 0 0 1 7.072 0M-6.364-6.364a9 9 0 0 1 12.728 0M-9.192-9.192a13 13 0 0 1 18.384 0'
+      }
+  );
 
   for (const [section, id_name, one] of [
     // ['Thermostat',[['cool','Cool'],['heat','Heat']],true],
@@ -135,33 +160,6 @@ document.addEventListener('DOMContentLoaded', () => {
       );
     }
   }
-
-  $('main', 'div',
-    'span', ['click'], { events: {
-      click: () => {
-        $('main', ['inactive']);
-        $(document.body, 'div', x => overlay = x,
-          $$('div', { id: 'overlay' }),
-          'div', { id: 'prompt' }, 'form',
-            $$('label',
-              $$('span', { text: 'SSID: ' }),
-              'input', { type: 'text', name: 'ssid' }, x => x.focus(),
-            ),
-            $$('label',
-              $$('span', { text: 'PASS: ' }),
-              'input', { type: 'password', name: 'pass' }
-            ),
-            'input', { type: 'submit', value: 'Connect' }
-        );
-      }
-    }}, 'svg', { id: 'wifi', viewBox: '-10.192 -14 20.385 16' },
-      $$('circle', { r: 2, stroke: 'none' }),
-      'path', {
-        fill: 'none', 'stroke-linecap': 'round', 'stroke-width': 2,
-        d: 'M-3.536-3.536a5 5 0 0 1 7.072 0M-6.364-6.364a9 9 0 0 1 12.728 0M-9.192-9.192a13 13 0 0 1 18.384 0'
-      }
-  );
-
 
   fetch('get',{ referrer: '' })
   .then(resp => resp.json())

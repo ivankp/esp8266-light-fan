@@ -45,6 +45,20 @@ form > * {
   margin: 1em;
   display: block;
 }
+form label > span {
+  margin-right: 0.5em;
+}
+
+.close {
+  position: absolute;
+  top: 0.25em;
+  right: 0.5em;
+  margin: 0;
+  user-select: none;
+}
+.close:hover {
+  font-weight: bold;
+}
 
 fieldset {
   border-radius: 0.5em;
