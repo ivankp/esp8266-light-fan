@@ -60,6 +60,19 @@ const toggle = (id,val) => {
   }
 };
 
+let overlay = null;
+const rmOverlay = () => {
+  if (overlay !== null) {
+    overlay.remove();
+    overlay = null;
+    $('main').classList.remove('inactive');
+  }
+};
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') rmOverlay();
+});
+
 document.addEventListener('DOMContentLoaded', () => {
   const div1 = $('main', 'div');
 
@@ -127,12 +140,12 @@ document.addEventListener('DOMContentLoaded', () => {
     'span', ['click'], { events: {
       click: () => {
         $('main', ['inactive']);
-        $(document.body,
+        $(document.body, 'div', x => overlay = x,
           $$('div', { id: 'overlay' }),
           'div', { id: 'prompt' }, 'form',
             $$('label',
               $$('span', { text: 'SSID: ' }),
-              'input', { type: 'text', name: 'ssid' }
+              'input', { type: 'text', name: 'ssid' }, x => x.focus(),
             ),
             $$('label',
               $$('span', { text: 'PASS: ' }),

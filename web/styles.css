@@ -34,9 +34,16 @@ body {
   margin-inline: auto;
   width: fit-content;
   background-color: #fff;
+  border: thick double grey;
+  border-radius: 0.5em;
+  padding: 1em;
 }
-form span {
+form {
   font-family: monospace;
+}
+form > * {
+  margin: 1em;
+  display: block;
 }
 
 fieldset {
