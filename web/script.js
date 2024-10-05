@@ -1,4 +1,4 @@
-const $ = (p,...args) => {
+const $ = (p, ...args) => {
   if (p.constructor === String) {
     p = document.getElementById(p);
   }
@@ -67,92 +67,86 @@ document.addEventListener('DOMContentLoaded', () => {
     // ['Thermostat',[['cool','Cool'],['heat','Heat']],true],
     ['Bedroom Ceiling',[['light','Light'],['fan','Fan']]]
   ]) {
-    const f = $(div1,'fieldset');
-    $(f,'legend').textContent = section;
-    const t = $(f,'table');
+    const t = $(div1, 'fieldset', $$('legend', { text: section }), 'table');
     const inputs = [ ];
     for (const [id, name] of id_name) {
-      if (id in all_inputs) {
-        document.body.innerHTML = '';
-        throw new Error(`Repeated input id "${id}"`);
-      }
-      const tr = $(t,'tr');
-      $(tr,'td').textContent = name+':';
-      const s = $(tr,'td','label',['switch']);
-      const input = $(s,'input',{id, type:'checkbox', events: {
-        change: function(){
-          const q = new URLSearchParams();
-          const modified = [ ];
-          const restore = () => {
-            for (const x of modified)
-              x.checked = x.old;
-          };
-          const f = (input) => {
-            q.set(input.id,input.checked?'1':'0');
-            modified.push(input);
-          };
-          if (one) {
-            for (const x of inputs) {
-              if (x!==this) x.checked = false;
-              f(x);
-            }
-          } else {
-            f(this);
-          }
-          fetch('set?'+q.toString(),{ referrer: '' })
-          .then(resp => resp.json())
-          .then(resp => {
-            console.log(resp);
-            if ('error' in resp) {
-              alert(resp.error);
-              restore();
-            } else {
-              for (const [key,val] of Object.entries(resp))
-                toggle(key,val);
+      $(t, 'tr',
+        $$('td', { text: name+':' }),
+        'td', 'label', ['switch'],
+        $$('input', { id, type: 'checkbox', events: {
+          change: function(){
+            const q = new URLSearchParams();
+            const modified = [ ];
+            const restore = () => {
               for (const x of modified)
-                if (!(x.id in resp)) x.checked = x.old;
+                x.checked = x.old;
+            };
+            const f = input => {
+              q.set(input.id,input.checked?'1':'0');
+              modified.push(input);
+            };
+            if (one) {
+              for (const x of inputs) {
+                if (x!==this) x.checked = false;
+                f(x);
+              }
+            } else {
+              f(this);
             }
-          })
-          .catch(e => {
-            alert('Request failed');
-            restore();
-            throw e;
-          });
-        }
-      }});
-      all_inputs[id] = input;
-      inputs.push(input);
-      input.old = input.checked;
-      $(s,'span',['slider']);
+            fetch('set?'+q.toString(),{ referrer: '' })
+            .then(resp => resp.json())
+            .then(resp => {
+              console.log(resp);
+              if ('error' in resp) {
+                alert(resp.error);
+                restore();
+              } else {
+                for (const [key,val] of Object.entries(resp))
+                  toggle(key,val);
+                for (const x of modified)
+                  if (!(x.id in resp)) x.checked = x.old;
+              }
+            })
+            .catch(e => {
+              alert('Request failed');
+              restore();
+              throw e;
+            });
+          }
+        }}, input => {
+          all_inputs[id] = input;
+          inputs.push(input);
+          input.old = input.checked;
+        }),
+        'span', ['slider']
+      );
     }
   }
 
   $('main', 'div',
-    $$('span', ['click'], { events: {
+    'span', ['click'], { events: {
       click: () => {
         $('main', ['inactive']);
         $(document.body,
           $$('div', { id: 'overlay' }),
-          $$('div', { id: 'prompt' }, 'form',
+          'div', { id: 'prompt' }, 'form',
             $$('label',
               $$('span', { text: 'SSID: ' }),
-              $$('input', { type: 'text', name: 'ssid' })
+              'input', { type: 'text', name: 'ssid' }
             ),
             $$('label',
               $$('span', { text: 'PASS: ' }),
-              $$('input', { type: 'password', name: 'pass' })
+              'input', { type: 'password', name: 'pass' }
             ),
-            $$('input', { type: 'submit', value: 'Connect' })
-          )
+            'input', { type: 'submit', value: 'Connect' }
         );
       }
     }}, 'svg', { id: 'wifi', viewBox: '-10.192 -14 20.385 16' },
       $$('circle', { r: 2, stroke: 'none' }),
-      $$('path', {
+      'path', {
         fill: 'none', 'stroke-linecap': 'round', 'stroke-width': 2,
         d: 'M-3.536-3.536a5 5 0 0 1 7.072 0M-6.364-6.364a9 9 0 0 1 12.728 0M-9.192-9.192a13 13 0 0 1 18.384 0'
-      })
-    )
+      }
   );
 
 
