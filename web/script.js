@@ -1,10 +1,6 @@
 const $ = (p,...args) => {
   if (p.constructor === String) {
-    if (p[0]==='#') {
-      p = document.getElementById(p.substring(1));
-    } else {
-      return x => $(x, p, ...args);
-    }
+    p = document.getElementById(p);
   }
   for (let x of args) {
     if (x.constructor === String) {
@@ -12,11 +8,10 @@ const $ = (p,...args) => {
         ? document.createElementNS('http://www.w3.org/2000/svg', x)
         : document.createElement(x)
       );
-    } else if (x.nodeType === Node.ELEMENT_NODE) {
-      p.appendChild(x);
+    // } else if (x.nodeType === Node.ELEMENT_NODE) {
+    //   p.appendChild(x);
     } else if (x.constructor === Array) {
-      for (let c of x)
-        p.classList.add(c);
+      p.classList.add(...x);
     } else if (x.constructor === Function) {
       x(p);
     } else if (x.constructor === Object) {
@@ -51,6 +46,7 @@ const $ = (p,...args) => {
   }
   return p;
 };
+const $$ = (...args) => p => $(p, ...args);
 
 const all_inputs = { };
 
@@ -65,7 +61,7 @@ const toggle = (id,val) => {
 };
 
 document.addEventListener('DOMContentLoaded', () => {
-  const div1 = $('#main', 'div');
+  const div1 = $('main', 'div');
 
   for (const [section, id_name, one] of [
     // ['Thermostat',[['cool','Cool'],['heat','Heat']],true],
@@ -131,31 +127,33 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  const div2 = $('#main', 'div');
-  const wifi = $(div2, 'span', ['click'], { events: {
-    click: () => {
-      $('#main', ['inactive']);
-      $(document.body,
-        $('div', { id: 'overlay' }),
-        $('div', { id: 'prompt' }, 'form',
-          $('label',
-            $('span', { text: 'SSID: ' }),
-            $('input', { type: 'text', name: 'ssid' })
-          ),
-          $('label',
-            $('span', { text: 'PASS: ' }),
-            $('input', { type: 'password', name: 'pass' })
-          ),
-          $('input', { type: 'submit', value: 'Connect' })
-        )
-      );
-    }
-  }}, 'svg', { id: 'wifi', viewBox: '-10.192 -14 20.385 16' });
-  $(wifi, 'circle', { r: 2, stroke: 'none' });
-  $(wifi, 'path', {
-    fill: 'none', 'stroke-linecap': 'round', 'stroke-width': 2,
-    d: 'M-3.536-3.536a5 5 0 0 1 7.072 0M-6.364-6.364a9 9 0 0 1 12.728 0M-9.192-9.192a13 13 0 0 1 18.384 0'
-  });
+  $('main', 'div',
+    $$('span', ['click'], { events: {
+      click: () => {
+        $('main', ['inactive']);
+        $(document.body,
+          $$('div', { id: 'overlay' }),
+          $$('div', { id: 'prompt' }, 'form',
+            $$('label',
+              $$('span', { text: 'SSID: ' }),
+              $$('input', { type: 'text', name: 'ssid' })
+            ),
+            $$('label',
+              $$('span', { text: 'PASS: ' }),
+              $$('input', { type: 'password', name: 'pass' })
+            ),
+            $$('input', { type: 'submit', value: 'Connect' })
+          )
+        );
+      }
+    }}, 'svg', { id: 'wifi', viewBox: '-10.192 -14 20.385 16' },
+      $$('circle', { r: 2, stroke: 'none' }),
+      $$('path', {
+        fill: 'none', 'stroke-linecap': 'round', 'stroke-width': 2,
+        d: 'M-3.536-3.536a5 5 0 0 1 7.072 0M-6.364-6.364a9 9 0 0 1 12.728 0M-9.192-9.192a13 13 0 0 1 18.384 0'
+      })
+    )
+  );
 
 
   fetch('get',{ referrer: '' })
