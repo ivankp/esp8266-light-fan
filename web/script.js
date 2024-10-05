@@ -90,13 +90,9 @@ document.addEventListener('DOMContentLoaded', () => {
               const disable = arg => { for (const x of xs) x.disabled = arg; };
               disable(true);
 
-              const cred = { };
-              for (const x of xs)
-                if (x.name) cred[x.name] = x.value + '\0';
-
               fetch('/',{
                 method: 'POST',
-                body: cred.ssid + cred.pass
+                body: `${xs[0].value}\0${xs[1].value}\0`
               }).then(r => {
                 p.style.color = r.ok ? '#0A0' : ( disable(false), '#A00' );
                 return r.text();
@@ -105,7 +101,7 @@ document.addEventListener('DOMContentLoaded', () => {
               }).catch(d => {
                 alert(d);
                 disable(false);
-                xs[0].focus();
+                xs[1].select();
               });
             }
           }},
