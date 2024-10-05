@@ -10,6 +10,7 @@ body {
   margin: 0.5em;
   display: flex;
   gap: 0.5em;
+  max-width: 800px;
 }
 #main > div:first-child {
   flex: 1 100%;

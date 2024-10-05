@@ -80,7 +80,35 @@ document.addEventListener('DOMContentLoaded', () => {
         $('main', ['inactive']);
         $(document.body, 'div', x => overlay = x,
           $$('div', { id: 'overlay' }),
-          'div', { id: 'prompt' }, 'form',
+          'div', { id: 'prompt' }, 'form', { events: {
+            submit: e => {
+              e.preventDefault();
+
+              const p = e.target.querySelectorAll('p');
+              const xs = e.target.querySelectorAll('input');
+
+              const disable = arg => { for (const x of xs) x.disabled = arg; };
+              disable(true);
+
+              const cred = { };
+              for (const x of xs)
+                if (x.name) cred[x.name] = x.value + '\0';
+
+              fetch('/',{
+                method: 'POST',
+                body: cred.ssid + cred.pass
+              }).then(r => {
+                p.style.color = r.ok ? '#0A0' : ( disable(false), '#A00' );
+                return r.text();
+              }).then(d => {
+                p.textContent = d;
+              }).catch(d => {
+                alert(d);
+                disable(false);
+                xs[0].focus();
+              });
+            }
+          }},
             $$('label',
               $$('span', { text: 'SSID:' }),
               'input', { type: 'text', name: 'ssid' }, x => x.focus(),
@@ -90,6 +118,7 @@ document.addEventListener('DOMContentLoaded', () => {
               'input', { type: 'password', name: 'pass' }
             ),
             $$('input', { type: 'submit', value: 'Connect' }),
+            $$('p'),
             'div', ['close', 'click'], { text: 'x', events: { click: rmOverlay }}
         );
       }
