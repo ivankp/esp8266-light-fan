@@ -84,15 +84,15 @@ document.addEventListener('DOMContentLoaded', () => {
             submit: e => {
               e.preventDefault();
 
+              const f = e.target.elements;
               const p = e.target.querySelectorAll('p');
-              const xs = e.target.querySelectorAll('input');
 
-              const disable = arg => { for (const x of xs) x.disabled = arg; };
+              const disable = b => { for (const x of f) x.disabled = b; };
               disable(true);
 
               fetch('/',{
                 method: 'POST',
-                body: `${xs[0].value}\0${xs[1].value}\0`
+                body: `${f.ssid}\0${f.pass}\0`
               }).then(r => {
                 p.style.color = r.ok ? '#0A0' : ( disable(false), '#A00' );
                 return r.text();
@@ -101,7 +101,7 @@ document.addEventListener('DOMContentLoaded', () => {
               }).catch(d => {
                 alert(d);
                 disable(false);
-                xs[1].select();
+                f.pass.select();
               });
             }
           }},
@@ -119,7 +119,7 @@ document.addEventListener('DOMContentLoaded', () => {
         );
       }
     }}, 'svg', { id: 'wifi', viewBox: '-10.192 -14 20.385 16' },
-      $$('circle', { r: 2, stroke: 'none' }),
+      $$('circle', { r: 2 }),
       'path', {
         fill: 'none', 'stroke-linecap': 'round', 'stroke-width': 2,
         d: 'M-3.536-3.536a5 5 0 0 1 7.072 0M-6.364-6.364a9 9 0 0 1 12.728 0M-9.192-9.192a13 13 0 0 1 18.384 0'
