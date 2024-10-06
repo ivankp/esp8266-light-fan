@@ -31,13 +31,13 @@
 #define LIGHT_SWITCH_PIN 13
 #define FAN_SWITCH_PIN 14
 
-#define SSID      "thermostat"
-#define PASS      "thermostat"
-#define MAX_CONN   8
+#define AP_SSID  "light-and-fan"
+#define AP_PASS  "automation"
+#define MAX_CONN 8
 
 // AP = access point
 // STA = station
-// stations connect to an access point
+// stations connect to access points
 
 // default AP IP address: 192.168.4.1
 
@@ -99,14 +99,14 @@ esp_err_t get_root(httpd_req_t* req) {
   httpd_resp_set_hdr(req,"Content-Encoding","gzip");
   const char* buf;
   size_t len;
-  if (connected) {
+  if (connected) { // TODO: always serve the same page
     buf = (const char*) control_html;
     len = control_html_end - control_html;
   } else {
     buf = (const char*) connect_html;
     len = connect_html_end - connect_html;
   }
-  httpd_resp_send(req,buf,len);
+  httpd_resp_send(req, buf, len);
   return ESP_OK;
 }
 httpd_uri_t get_root_def = {
@@ -117,12 +117,14 @@ httpd_uri_t get_root_def = {
 };
 
 esp_err_t get_get(httpd_req_t* req) {
-  if (connected) {
-    char buf[] = "{\"light\":L,\"fan\":F}";
-    *strchr(buf,'L') = '0' + (char)(gpio_get_level(LIGHT_PIN));
-    *strchr(buf,'F') = '0' + (char)(gpio_get_level(FAN_PIN));
-    httpd_resp_set_type(req,HTTPD_TYPE_JSON);
-    httpd_resp_send(req,buf,strlen(buf));
+  if (connected) { // TODO: get rid of this check
+    char buf[] = "{\"light\":0,\"fan\":0}";
+    char* c = strchr(buf, '0');
+    *c += gpio_get_level(LIGHT_PIN);
+    c = strchr(c+1, '0');
+    *c += gpio_get_level(FAN_PIN);
+    httpd_resp_set_type(req, HTTPD_TYPE_JSON);
+    httpd_resp_send(req, buf, strlen(buf));
     return ESP_OK;
   } else {
     return httpd_resp_send_404(req);
@@ -211,12 +213,13 @@ httpd_uri_t get_set_def = {
 };
 
 esp_err_t post_root(httpd_req_t* req) {
-  if (connected) {
+  if (connected) { // TODO: always same pages
     httpd_resp_set_status(req,"405 Method Not Allowed");
     httpd_resp_send(req,"",0);
     return ESP_OK;
   } else {
     char buf[sizeof(wifi_ssid)+sizeof(wifi_pass)];
+    // TODO: respond too much data received
     int remaining = req->content_len;
 
     if (remaining > sizeof(buf))
@@ -233,11 +236,11 @@ esp_err_t post_root(httpd_req_t* req) {
     }
 
     char *a = buf;
-    char *b = memchr(a,'\0',sizeof(wifi_ssid));
+    char *b = memchr(a,'\0',sizeof(wifi_ssid)); // TODO: n <= remaining
     if (!b) goto bad_ssid;
     ++b;
     const size_t ssid_len = b-a;
-    if (ssid_len < 3 || sizeof(wifi_ssid) < ssid_len) {
+    if (ssid_len < 3 || sizeof(wifi_ssid) < ssid_len) { // TODO: no need for the second check
 bad_ssid:
 #define RESPONSE "SSID must be 2 to " STR(MAX_SSID_STRLEN) " bytes long"
       httpd_resp_set_status(req, "400 Bad Request");
@@ -249,11 +252,11 @@ bad_ssid:
     memcpy(wifi_ssid,a,ssid_len);
 
     a = b;
-    b = memchr(a,'\0',sizeof(wifi_pass));
+    b = memchr(a,'\0',sizeof(wifi_pass)); // TODO: n <= remaining
     if (!b) goto bad_pass;
     ++b;
     const size_t pass_len = b-a;
-    if (sizeof(wifi_pass) < pass_len) {
+    if (sizeof(wifi_pass) < pass_len) { // TODO: check above
 bad_pass:
 #define RESPONSE "Password must be at most " STR(MAX_PASS_STRLEN) " bytes long"
       httpd_resp_set_status(req, "400 Bad Request");
@@ -303,9 +306,9 @@ void start_access_point(void) {
 
   wifi_config_t wifi_config = {
     .ap = {
-      .ssid = SSID,
-      .ssid_len = sizeof(SSID),
-      .password = PASS,
+      .ssid = AP_SSID,
+      .ssid_len = sizeof(AP_SSID),
+      .password = AP_PASS,
       .max_connection = MAX_CONN,
       .authmode = WIFI_AUTH_WPA_WPA2_PSK
     }
@@ -430,7 +433,6 @@ void start_station(void) {
   ESP_ERROR_CHECK(esp_wifi_start());
 }
 
-// static const int switch_pin[] = { LIGHT_SWITCH_PIN, FAN_SWITCH_PIN };
 static const int output_pin[] = { LIGHT_PIN, FAN_PIN };
 static volatile int switch_state[] = { 0, 0 };
 static volatile bool switch_enable[] = { true, true };
