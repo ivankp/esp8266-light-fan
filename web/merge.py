@@ -2,15 +2,16 @@
 
 import sys, re
 from urllib.parse import quote
+import requests
 
 re_ns   = re.compile(r'\n+\s*')
 re_tag  = re.compile(r'<(link|script)\b[^>]*>')
 re_attr = re.compile(r'\b(\w+)="([^"]+)"')
-re_script = [ (re.compile(r), s) for r, s in [
-    ( r'//.*\n', '' ),
-    ( r'\n+\s*', '' ),
-    ( r'\s*([][+-=<>{}()?:;,*&|]+)\s*', r'\1' )
-]]
+# re_script = [ (re.compile(r), s) for r, s in [
+#     ( r'//.*\n', '' ),
+#     ( r'\n+\s*', '' ),
+#     ( r'\s*([][+-=<>{}()?:;,*&|]+)\s*', r'\1' )
+# ]]
 re_style = [ (re.compile(r), s) for r, s in [
     ( r'\s+([,+<>])\s+', r' \1 ' ),
     ( r'\s*([:{};])\s*', r'\1' )
@@ -36,9 +37,13 @@ for t in re_tag.finditer(html):
     merged += html[ cursor : t.start() ]
     if t[1] == 'script':
         script = read(attrs['src'])
-        for r, s in re_script:
-            script = r.sub(s, script)
-        merged += '<script>' + script
+        # for r, s in re_script:
+        #     script = r.sub(s, script)
+
+        merged += '<script>' + requests.post(
+            'https://www.toptal.com/developers/javascript-minifier/api/raw',
+            data = { 'input': script }
+        ).text
 
     else:
         rel = attrs['rel']
