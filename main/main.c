@@ -1,3 +1,6 @@
+// https://github.com/espressif/ESP8266_RTOS_SDK
+// https://docs.espressif.com/projects/esp8266-rtos-sdk/en/latest/
+
 #include <string.h>
 
 #include "freertos/FreeRTOS.h"
@@ -20,10 +23,7 @@
 #include "lwip/err.h"
 #include "lwip/sys.h"
 
-#define STR1(x) #x
-#define STR(x) STR1(x)
-
-// #define FIELD_SIZE(t,f) (sizeof(((t*)0)->f))
+// Config ===========================================================
 
 #define LED_PIN 2
 #define LIGHT_PIN 5
@@ -31,63 +31,194 @@
 #define LIGHT_SWITCH_PIN 13
 #define FAN_SWITCH_PIN 14
 
+// default Access Point IP address: 192.168.4.1
 #define AP_SSID  "light-and-fan"
 #define AP_PASS  "automation"
 #define MAX_CONN 8
 
-// AP = access point
-// STA = station
-// stations connect to access points
+// embedded static files
+extern const uint8_t index_html[] asm("_binary_index_html_gz_start");
+extern const uint8_t index_html_end[] asm("_binary_index_html_gz_end");
 
-// default AP IP address: 192.168.4.1
+// Helpers ==========================================================
 
-static httpd_handle_t server = NULL;
+#define STR1(x) #x
+#define STR(x) STR1(x)
 
-// embed static files
-extern const uint8_t connect_html[] asm("_binary_min_connect_html_gz_start");
-extern const uint8_t connect_html_end[] asm("_binary_min_connect_html_gz_end");
+// #define FIELD_SIZE(t,f) (sizeof(((t*)0)->f))
 
-extern const uint8_t control_html[] asm("_binary_min_control_html_gz_start");
-extern const uint8_t control_html_end[] asm("_binary_min_control_html_gz_end");
+#define VERBOSITY 1
+
+#define CHECK_OK_VERBOSE(x) \
+  if ((x) != ESP_OK) { puts(STR(__LINE__) ": " #x " != ESP_OK"); goto err; }
+#define CHECK_OK(x) \
+  if ((x) != ESP_OK) { goto err; }
+
+#if VERBOSITY > 0
+#  define CHECK_OK_1 CHECK_OK_VERBOSE
+#else
+#  define CHECK_OK_1 CHECK_OK
+#endif
+
+#if VERBOSITY > 1
+#  define CHECK_OK_2 CHECK_OK_VERBOSE
+#else
+#  define CHECK_OK_2 CHECK_OK
+#endif
+
+// GPIO =============================================================
+
+// TODO: transpose
+static const int output_pin[] = { LIGHT_PIN, FAN_PIN };
+static volatile int switch_state[] = { 0, 0 };
+static volatile bool switch_enable[] = { true, true };
+static TimerHandle_t switch_timer[] = { NULL, NULL };
+
+static void switch_isr(void *arg) {
+  const int i = (int)arg;
+  if (switch_enable[i]) {
+    switch_enable[i] = false;
+    // set output pin level
+    gpio_set_level(output_pin[i], (switch_state[i] = !switch_state[i]));
+  }
+  // start timer
+  BaseType_t xHigherPriorityTaskWoken = pdTRUE;
+  xTimerStartFromISR( switch_timer[i], &xHigherPriorityTaskWoken );
+}
+
+// TODO: combine timer callbacks
+static void light_switch_timer_callback(void *arg) {
+  // set output pin level
+  gpio_set_level(LIGHT_PIN,
+    (switch_state[0] = gpio_get_level(LIGHT_SWITCH_PIN)));
+  // enable switch
+  switch_enable[0] = true;
+  // TODO: notify clients
+}
+
+static void fan_switch_timer_callback(void *arg) {
+  // set output pin level
+  gpio_set_level(FAN_PIN,
+    (switch_state[1] = gpio_get_level(FAN_SWITCH_PIN)));
+  // enable switch
+  switch_enable[1] = true;
+  // TODO: notify clients
+}
+
+void init_gpio(void) {
+  { gpio_config_t io_conf = {
+      .mode = GPIO_MODE_OUTPUT,
+      .pull_up_en = GPIO_PULLUP_DISABLE,
+      .pull_down_en = GPIO_PULLDOWN_DISABLE,
+      .intr_type = GPIO_INTR_DISABLE /* no interrupt */
+    };
+
+#define OUTPUT_PIN(PIN,VAL) \
+    io_conf.pin_bit_mask = (1ull << PIN); /* GPIO pin */ \
+    gpio_config(&io_conf); \
+    gpio_set_level(PIN, VAL);
+
+    OUTPUT_PIN(  LED_PIN, 1/*inverted*/)
+    OUTPUT_PIN(LIGHT_PIN, 0)
+    OUTPUT_PIN(  FAN_PIN, 0)
+
+    io_conf.mode = GPIO_MODE_INPUT;
+    io_conf.intr_type = GPIO_INTR_DISABLE; /* interrupt edge */
+
+#define INPUT_PIN(PIN) \
+    io_conf.pin_bit_mask = (1ull << PIN); /* GPIO pin */ \
+    gpio_config(&io_conf);
+
+    INPUT_PIN(LIGHT_SWITCH_PIN)
+    INPUT_PIN(  FAN_SWITCH_PIN)
+  }
+
+  switch_timer[0] = xTimerCreate/*Static*/(
+    "",
+    50 / portTICK_PERIOD_MS, // period in ticks
+    pdFALSE, // not periodic
+    (void*) 0, // timer id
+    light_switch_timer_callback
+  );
+  switch_timer[1] = xTimerCreate/*Static*/(
+    "",
+    50 / portTICK_PERIOD_MS, // period in ticks
+    pdFALSE, // not periodic
+    (void*) 0, // timer id
+    fan_switch_timer_callback
+  );
+
+  // install gpio isr service
+  gpio_install_isr_service(0);
+
+  // hook isr handlers for specific gpio pins
+  gpio_isr_handler_add(LIGHT_SWITCH_PIN, switch_isr, (void*)0);
+  gpio_isr_handler_add(  FAN_SWITCH_PIN, switch_isr, (void*)1);
+
+  gpio_set_intr_type(LIGHT_SWITCH_PIN, GPIO_INTR_ANYEDGE);
+  gpio_set_intr_type(  FAN_SWITCH_PIN, GPIO_INTR_ANYEDGE);
+}
+
+// NVS ==============================================================
 
 // ESP8266_RTOS_SDK/components/esp8266/include/esp_wifi_types.h
-#define MAX_SSID_STRLEN 31
-#define MAX_PASS_STRLEN 63
+// store last 8 successfully used access point credentials
+#define MAX_SSID_STRLEN 32
+#define MAX_PASS_STRLEN 64
+// global variables are zeroed automatically
 static char
-  wifi_ssid[MAX_SSID_STRLEN+1] = { '\0' },
-  wifi_pass[MAX_PASS_STRLEN+1] = { '\0' };
+  wifi_ssid[MAX_SSID_STRLEN][8],
+  wifi_pass[MAX_PASS_STRLEN][8];
 
+// https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/storage/nvs_flash.html
 nvs_handle_t nvs;
 
 void nvs_get_ssid_pass(void) {
   esp_err_t err;
   size_t len;
-  /* nvs_get_str(nvs, "wifi_ssid", NULL, &required_size); */
   len = sizeof(wifi_ssid);
-  err = nvs_get_str(nvs, "ssid", wifi_ssid, &len);
-  if (err != ESP_OK) goto err;
+  CHECK_OK(nvs_get_blob(nvs, "ssid", wifi_ssid, &len));
   len = sizeof(wifi_pass);
-  err = nvs_get_str(nvs, "pass", wifi_pass, &len);
-  if (err != ESP_OK) goto err;
+  CHECK_OK(nvs_get_blob(nvs, "pass", wifi_pass, &len));
 
   return;
-
 err:
-  wifi_ssid[0] = '\0';
-  wifi_pass[0] = '\0';
+  // signal that no valid credentials are available
+  wifi_ssid[0][0] = '\0';
 }
+
 void nvs_set_ssid_pass(void) {
-  esp_err_t err;
-  err = nvs_set_str(nvs, "ssid", wifi_ssid);
-  if (err != ESP_OK) goto err;
-  err = nvs_set_str(nvs, "pass", wifi_pass);
-  if (err != ESP_OK) goto err;
+  if (!wifi_ssid[0][0]) return; // no valid credentials
+  CHECK_OK(nvs_set_blob(nvs, "ssid", wifi_ssid, sizeof(wifi_ssid)));
+  CHECK_OK(nvs_set_blob(nvs, "pass", wifi_pass, sizeof(wifi_pass)));
 
-  return;
-
-err:
-  ;
+err: ;
 }
+
+void init_nvs(void) {
+  // https://github.com/espressif/esp-idf/blob/cf7e743a9b2e5fd2520be4ad047c8584188d54da/examples/storage/nvs_rw_value/main/nvs_value_example_main.c
+
+  esp_err_t err = nvs_flash_init();
+  if (
+    err == ESP_ERR_NVS_NO_FREE_PAGES ||
+    err == ESP_ERR_NVS_NEW_VERSION_FOUND
+  ) { // NVS partition was truncated and needs to be erased
+    CHECK_OK_1(nvs_flash_erase());
+    CHECK_OK_1(nvs_flash_init());
+  }
+
+  CHECK_OK_1(nvs_open("storage", NVS_READWRITE, &nvs));
+
+  nvs_get_ssid_pass();
+
+err: ;
+}
+
+// HTTP =============================================================
+
+// AP = access point
+// STA = station
+// stations connect to access points
 
 static bool new_ap = false;
 static int connected = 0;
@@ -242,13 +373,13 @@ esp_err_t post_root(httpd_req_t* req) {
     const size_t ssid_len = b-a;
     if (ssid_len < 3 || sizeof(wifi_ssid) < ssid_len) { // TODO: no need for the second check
 bad_ssid:
-#define RESPONSE "SSID must be 2 to " STR(MAX_SSID_STRLEN) " bytes long"
+#define RESPONSE "SSID size must be [2," STR(MAX_SSID_STRLEN) ") bytes"
       httpd_resp_set_status(req, "400 Bad Request");
       httpd_resp_send(req, RESPONSE, sizeof(RESPONSE));
 #undef RESPONSE
       return ESP_OK;
     }
-    memset(wifi_ssid,0,MAX_SSID_STRLEN+1); // zero out
+    memset(wifi_ssid,0,MAX_SSID_STRLEN); // zero out
     memcpy(wifi_ssid,a,ssid_len);
 
     a = b;
@@ -258,13 +389,13 @@ bad_ssid:
     const size_t pass_len = b-a;
     if (sizeof(wifi_pass) < pass_len) { // TODO: check above
 bad_pass:
-#define RESPONSE "Password must be at most " STR(MAX_PASS_STRLEN) " bytes long"
+#define RESPONSE "Password size must be less than " STR(MAX_PASS_STRLEN) " bytes"
       httpd_resp_set_status(req, "400 Bad Request");
       httpd_resp_send(req, RESPONSE, sizeof(RESPONSE));
 #undef RESPONSE
       return ESP_OK;
     }
-    memset(wifi_pass,0,MAX_PASS_STRLEN+1); // zero out
+    memset(wifi_pass,0,MAX_PASS_STRLEN); // zero out
     memcpy(wifi_pass,a,pass_len);
     new_ap = true;
 
@@ -406,166 +537,70 @@ static void station_event_handler(
   }
 }
 
-void start_station(void) {
+esp_err_t start_station(void) {
+  // TODO: try all credentials
   connected = 1;
 
   wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-  ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+  CHECK_OK(esp_wifi_init(&cfg));
 
-  ESP_ERROR_CHECK(esp_event_handler_register(
+  CHECK_OK(esp_event_handler_register(
     WIFI_EVENT, ESP_EVENT_ANY_ID, &station_event_handler, NULL
   ));
-  ESP_ERROR_CHECK(esp_event_handler_register(
+  CHECK_OK(esp_event_handler_register(
     IP_EVENT, IP_EVENT_STA_GOT_IP, &station_event_handler, NULL
   ));
 
   wifi_config_t wifi_config = {
     .sta = { }
   };
-  memcpy(wifi_config.sta.ssid    , wifi_ssid, MAX_SSID_STRLEN+1);
-  memcpy(wifi_config.sta.password, wifi_pass, MAX_PASS_STRLEN+1);
+  memcpy(wifi_config.sta.ssid    , wifi_ssid, MAX_SSID_STRLEN);
+  memcpy(wifi_config.sta.password, wifi_pass, MAX_PASS_STRLEN);
   if (wifi_pass[0]) {
     wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
   }
 
-  ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA) );
-  ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config) );
-  ESP_ERROR_CHECK(esp_wifi_start());
+  CHECK_OK(esp_wifi_set_mode(WIFI_MODE_STA));
+  CHECK_OK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config));
+  CHECK_OK(esp_wifi_start());
+
+  return ESP_OK;
+err:
+  esp_wifi_stop();
+  return err;
 }
 
-static const int output_pin[] = { LIGHT_PIN, FAN_PIN };
-static volatile int switch_state[] = { 0, 0 };
-static volatile bool switch_enable[] = { true, true };
-static TimerHandle_t switch_timer[] = { NULL, NULL };
-
-static void switch_isr(void *arg) {
-  const int i = (int)arg;
-  if (switch_enable[i]) {
-    switch_enable[i] = false;
-    // set output pin level
-    gpio_set_level(output_pin[i], (switch_state[i] = !switch_state[i]));
-  }
-  // start timer
-  BaseType_t xHigherPriorityTaskWoken = pdTRUE;
-  xTimerStartFromISR( switch_timer[i], &xHigherPriorityTaskWoken );
-}
-static void light_switch_timer_callback(void *arg) {
-  // set output pin level
-  gpio_set_level(LIGHT_PIN,
-    (switch_state[0] = gpio_get_level(LIGHT_SWITCH_PIN)));
-  // enable switch
-  switch_enable[0] = true;
-  // TODO: notify clients
-}
-static void fan_switch_timer_callback(void *arg) {
-  // set output pin level
-  gpio_set_level(FAN_PIN,
-    (switch_state[1] = gpio_get_level(FAN_SWITCH_PIN)));
-  // enable switch
-  switch_enable[1] = true;
-  // TODO: notify clients
-}
-
-void app_main(void) {
-  // HTTP ===========================================================
-  esp_err_t err;
-
+void init_http(void) {
   tcpip_adapter_init();
 
-  ESP_ERROR_CHECK(esp_netif_init());
-  ESP_ERROR_CHECK(esp_event_loop_create_default());
+  CHECK_OK_1(esp_netif_init());
+  CHECK_OK_1(esp_event_loop_create_default());
 
-  // Initialize NVS -------------------------------------------------
-  // https://github.com/espressif/esp-idf/blob/cf7e743a9b2e5fd2520be4ad047c8584188d54da/examples/storage/nvs_rw_value/main/nvs_value_example_main.c
-  err = nvs_flash_init();
-  if (
-    err == ESP_ERR_NVS_NO_FREE_PAGES ||
-    err == ESP_ERR_NVS_NEW_VERSION_FOUND
-  ) { // NVS partition was truncated and needs to be erased
-    ESP_ERROR_CHECK(nvs_flash_erase());
-    err = nvs_flash_init();
-  }
-  ESP_ERROR_CHECK(err);
-
-  err = nvs_open("storage", NVS_READWRITE, &nvs);
-  if (err != ESP_OK) {
-    puts("Failed to open nvs");
-    goto skip_wifi;
-  }
-
-  nvs_get_ssid_pass();
-
-  // Start HTTP daemon ----------------------------------------------
-  server = NULL;
+  // Start HTTP daemon
+  httpd_handle_t server = NULL;
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
 
-  err = httpd_start(&server, &config);
-  if (err != ESP_OK) {
-    puts("Failed to start httpd");
-    goto skip_wifi;
-  }
+  CHECK_OK_1(httpd_start(&server, &config));
 
   // Set URI handlers
+  // TODO: do defs need to persist?
   httpd_register_uri_handler(server, & get_root_def);
   httpd_register_uri_handler(server, &post_root_def);
   httpd_register_uri_handler(server, & get_get_def);
   httpd_register_uri_handler(server, & get_set_def);
 
-  // Start WiFi -----------------------------------------------------
-  if (wifi_ssid[0]) start_station();
-  else start_access_point();
-
-skip_wifi: ;
-
-  // GPIO ===========================================================
-  { gpio_config_t io_conf = {
-      .mode = GPIO_MODE_OUTPUT,
-      .pull_up_en = GPIO_PULLUP_DISABLE,
-      .pull_down_en = GPIO_PULLDOWN_DISABLE,
-      .intr_type = GPIO_INTR_DISABLE /* no interrupt */
-    };
-
-#define OUTPUT_PIN(PIN,VAL) \
-    io_conf.pin_bit_mask = (1ull << PIN); /* GPIO pin */ \
-    gpio_config(&io_conf); \
-    gpio_set_level(PIN, VAL);
-
-    OUTPUT_PIN(  LED_PIN, 1/*inverted*/)
-    OUTPUT_PIN(LIGHT_PIN, 0)
-    OUTPUT_PIN(  FAN_PIN, 0)
-
-    io_conf.mode = GPIO_MODE_INPUT;
-    io_conf.intr_type = GPIO_INTR_DISABLE; /* interrupt edge */
-
-#define INPUT_PIN(PIN) \
-    io_conf.pin_bit_mask = (1ull << PIN); /* GPIO pin */ \
-    gpio_config(&io_conf);
-
-    INPUT_PIN(LIGHT_SWITCH_PIN)
-    INPUT_PIN(  FAN_SWITCH_PIN)
+  // Start WiFi
+  if (start_station() != ESP_OK) {
+    start_access_point();
   }
 
-  switch_timer[0] = xTimerCreate/*Static*/(
-    "",
-    50 / portTICK_PERIOD_MS, // period in ticks
-    pdFALSE, // not periodic
-    (void*) 0, // timer id
-    light_switch_timer_callback
-  );
-  switch_timer[1] = xTimerCreate/*Static*/(
-    "",
-    50 / portTICK_PERIOD_MS, // period in ticks
-    pdFALSE, // not periodic
-    (void*) 0, // timer id
-    fan_switch_timer_callback
-  );
+err: ;
+}
 
-  // install gpio isr service
-  gpio_install_isr_service(0);
-  // hook isr handlers for specific gpio pins
-  gpio_isr_handler_add(LIGHT_SWITCH_PIN, switch_isr, (void*)0);
-  gpio_isr_handler_add(  FAN_SWITCH_PIN, switch_isr, (void*)1);
+// MAIN =============================================================
 
-  gpio_set_intr_type(LIGHT_SWITCH_PIN,GPIO_INTR_ANYEDGE);
-  gpio_set_intr_type(  FAN_SWITCH_PIN,GPIO_INTR_ANYEDGE);
+void app_main(void) {
+  init_gpio();
+  init_nvs();
+  init_http();
 }
