@@ -202,7 +202,7 @@ void nvs_add_wifi_cred(const uint8_t* new_cred) {
   const uint8_t* a = wifi_cred;
   uint8_t ncreds = a ? *a++ : 0;
 
-  uint8_t *b = a, *c = a, *d = a, *e = a;
+  const uint8_t *b = a, *c = a, *d = a, *e = a;
   for (uint8_t i = 0; i < ncreds; ++i) {
     d = e;
     const uint8_t ssid_len = *e++;
@@ -216,10 +216,11 @@ void nvs_add_wifi_cred(const uint8_t* new_cred) {
       c += pass_len;
     }
     e += ssid_len; // skip ssid
-    e += *e++; // skip pass
+    const uint8_t pass_len = *e++;
+    e += pass_len; // skip pass
   }
 
-  if (ncreds > 7) e = d;
+  if (ncreds > 7 && c == a) e = d;
 
   size_t new_len = 3; // ncreds, new_ssid_len, new_pass_len
   new_len += new_ssid_len;
@@ -227,7 +228,7 @@ void nvs_add_wifi_cred(const uint8_t* new_cred) {
   new_len += b - a;
   new_len += e - c;
 
-  if (ncreds < 8) ++ncreds;
+  if (ncreds < 8 && c == a) ++ncreds;
 
   uint8_t* p = malloc(new_len);
   *p++ = ncreds;
