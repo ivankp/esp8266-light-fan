@@ -50,12 +50,12 @@ const $$ = (...args) => p => $(p, ...args);
 
 const all_inputs = { };
 
-const toggle = (id,val) => {
+const toggle = (id, val) => {
   const input = all_inputs[id];
   if (input) {
     if (input.old = input.checked = val) input.classList.add('on');
     else input.classList.remove('on');
-  } else { // reload if server responded with an unknows input id
+  } else { // reload if server responded with an unknown input id
     window.location.reload();
   }
 };

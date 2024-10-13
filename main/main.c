@@ -37,8 +37,8 @@
 #define MAX_CONN 8
 
 // embedded static files
-extern const uint8_t index_html[] asm("_binary_index_html_gz_start");
-extern const uint8_t index_html_end[] asm("_binary_index_html_gz_end");
+extern const uint8_t index_page[] asm("_binary_index_html_gz_start");
+extern const uint8_t index_page_end[] asm("_binary_index_html_gz_end");
 
 // Helpers ==========================================================
 
@@ -105,7 +105,7 @@ static void fan_switch_timer_callback(void *arg) {
   // TODO: notify clients
 }
 
-void init_gpio(void) {
+static void init_gpio(void) {
   { gpio_config_t io_conf = {
       .mode = GPIO_MODE_OUTPUT,
       .pull_up_en = GPIO_PULLUP_DISABLE,
@@ -163,39 +163,87 @@ void init_gpio(void) {
 
 // ESP8266_RTOS_SDK/components/esp8266/include/esp_wifi_types.h
 // store last 8 successfully used access point credentials
-#define MAX_SSID_STRLEN 32
-#define MAX_PASS_STRLEN 64
-// global variables are zeroed automatically
-static char
-  wifi_ssid[MAX_SSID_STRLEN][8],
-  wifi_pass[MAX_PASS_STRLEN][8];
+// #define MAX_SSID_LEN 32
+// #define MAX_PASS_LEN 64
+#define MAX_PASS_LEN MAX_PASSPHRASE_LEN
+
+// 1 : number of saved credentials
+// n : 1 : ssid length
+//     n : ssid
+//     1 : password length
+//     n : password
+static uint8_t* wifi_cred = NULL;
 
 // https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/storage/nvs_flash.html
 nvs_handle_t nvs;
 
-void nvs_get_ssid_pass(void) {
-  esp_err_t err;
-  size_t len;
-  len = sizeof(wifi_ssid);
-  CHECK_OK(nvs_get_blob(nvs, "ssid", wifi_ssid, &len));
-  len = sizeof(wifi_pass);
-  CHECK_OK(nvs_get_blob(nvs, "pass", wifi_pass, &len));
+void nvs_get_wifi_cred(void) {
+  size_t wifi_cred_len = 0;
+  CHECK_OK(nvs_get_blob(nvs, "wifi_cred", NULL, &wifi_cred_len)); // get length
+  if (wifi_cred) free(wifi_cred);
+  wifi_cred = malloc(wifi_cred_len);
+  CHECK_OK(nvs_get_blob(nvs, "wifi_cred", &wifi_cred, &wifi_cred_len)); // get data
 
   return;
 err:
-  // signal that no valid credentials are available
-  wifi_ssid[0][0] = '\0';
+  // no valid credentials are available
+  if (wifi_cred) free(wifi_cred);
+  wifi_cred = NULL;
 }
 
-void nvs_set_ssid_pass(void) {
-  if (!wifi_ssid[0][0]) return; // no valid credentials
-  CHECK_OK(nvs_set_blob(nvs, "ssid", wifi_ssid, sizeof(wifi_ssid)));
-  CHECK_OK(nvs_set_blob(nvs, "pass", wifi_pass, sizeof(wifi_pass)));
+void nvs_add_wifi_cred(const uint8_t* new_cred) {
+  const uint8_t  new_ssid_len = *new_cred++;
+  const uint8_t* new_ssid = new_cred;
+  new_cred += new_ssid_len;
+  const uint8_t  new_pass_len = *new_cred++;
+  const uint8_t* new_pass = new_cred;
+  new_cred = new_ssid - 1;
+
+  const uint8_t* a = wifi_cred;
+  uint8_t ncreds = a ? *a++ : 0;
+
+  uint8_t *b = a, *c = a, *d = a, *e = a;
+  for (uint8_t i = 0; i < ncreds; ++i) {
+    d = e;
+    const uint8_t ssid_len = *e++;
+    if (b == a && ssid_len == new_ssid_len && !memcmp(e, new_ssid, ssid_len)) {
+      c = e + ssid_len;
+      const uint8_t pass_len = *c++;
+      if (d == a && pass_len == new_pass_len && !memcmp(c, new_pass, pass_len)) {
+        return; // same ssid and pass in first credential
+      }
+      b = d;
+      c += pass_len;
+    }
+    e += ssid_len; // skip ssid
+    e += *e++; // skip pass
+  }
+
+  if (ncreds > 7) e = d;
+
+  size_t new_len = 3; // ncreds, new_ssid_len, new_pass_len
+  new_len += new_ssid_len;
+  new_len += new_pass_len;
+  new_len += b - a;
+  new_len += e - c;
+
+  if (ncreds < 8) ++ncreds;
+
+  uint8_t* p = malloc(new_len);
+  *p++ = ncreds;
+  p = mempcpy(p, new_cred, new_ssid_len + new_pass_len + 2);
+  p = mempcpy(p, a, b - a);
+  p = mempcpy(p, c, e - c);
+
+  if (wifi_cred) free(wifi_cred);
+  wifi_cred = p - new_len;
+
+  CHECK_OK(nvs_set_blob(nvs, "wifi_cred", wifi_cred, new_len));
 
 err: ;
 }
 
-void init_nvs(void) {
+static void init_nvs(void) {
   // https://github.com/espressif/esp-idf/blob/cf7e743a9b2e5fd2520be4ad047c8584188d54da/examples/storage/nvs_rw_value/main/nvs_value_example_main.c
 
   esp_err_t err = nvs_flash_init();
@@ -209,7 +257,7 @@ void init_nvs(void) {
 
   CHECK_OK_1(nvs_open("storage", NVS_READWRITE, &nvs));
 
-  nvs_get_ssid_pass();
+  nvs_get_wifi_cred();
 
 err: ;
 }
@@ -228,16 +276,7 @@ void start_station(void);
 
 esp_err_t get_root(httpd_req_t* req) {
   httpd_resp_set_hdr(req,"Content-Encoding","gzip");
-  const char* buf;
-  size_t len;
-  if (connected) { // TODO: always serve the same page
-    buf = (const char*) control_html;
-    len = control_html_end - control_html;
-  } else {
-    buf = (const char*) connect_html;
-    len = connect_html_end - connect_html;
-  }
-  httpd_resp_send(req, buf, len);
+  httpd_resp_send(req, (const char*) index_page, index_page_end - index_page);
   return ESP_OK;
 }
 httpd_uri_t get_root_def = {
@@ -248,18 +287,14 @@ httpd_uri_t get_root_def = {
 };
 
 esp_err_t get_get(httpd_req_t* req) {
-  if (connected) { // TODO: get rid of this check
-    char buf[] = "{\"light\":0,\"fan\":0}";
-    char* c = strchr(buf, '0');
-    *c += gpio_get_level(LIGHT_PIN);
-    c = strchr(c+1, '0');
-    *c += gpio_get_level(FAN_PIN);
-    httpd_resp_set_type(req, HTTPD_TYPE_JSON);
-    httpd_resp_send(req, buf, strlen(buf));
-    return ESP_OK;
-  } else {
-    return httpd_resp_send_404(req);
-  }
+  char buf[] = "{\"light\":0,\"fan\":0}";
+  char* p = strchr(buf, '0');
+  *p += gpio_get_level(LIGHT_PIN);
+  p = strchr(p+1, '0');
+  *p += gpio_get_level(FAN_PIN);
+  httpd_resp_set_type(req, HTTPD_TYPE_JSON);
+  httpd_resp_send(req, buf, strlen(buf));
+  return ESP_OK;
 }
 httpd_uri_t get_get_def = {
   .uri       = "/get",
@@ -269,72 +304,67 @@ httpd_uri_t get_get_def = {
 };
 
 esp_err_t get_set(httpd_req_t* req) {
-  if (connected) {
-    char buf[64] = "{";
-    size_t buf_len = 1;
-    const char* a = strchr(req->uri,'?');
-    if (!a || !*++a) goto send;
-    while (*a == '&') ++a;
+  char buf[64] = "{";
+  char* buf_ptr = buf + 1;
+  const char* a = strchr(req->uri,'?');
+  if (!a || !*++a) goto send;
+  while (*a == '&') ++a;
 
-    const char *b=a, *key = NULL;
-    size_t key_len = 0;
-    for (;;) {
-      const char c = *b;
-      if (c == '=' && !key) {
-        key = a;
-        key_len = b-a;
-        a = ++b;
-      } else if (c == '&' || c == '\0') {
+  const char *b=a, *key = NULL;
+  size_t key_len = 0;
+  for (;;) {
+    const char c = *b;
+    if (c == '=' && !key) {
+      key = a;
+      key_len = b-a;
+      a = ++b;
+    } else if (c == '&' || c == '\0') {
+      if (!key) goto next;
 
 #define KEYCMP(KEY) \
-        (key_len==(sizeof(KEY)-1) && !strncmp(key,KEY,key_len))
-#define KEYCPY(KEY) \
-        if (buf_len > 1) { buf[buf_len++] = ','; } \
-        strcpy(buf+buf_len,"\"" KEY "\":"); \
-        buf_len += sizeof("\"" KEY "\":")-1;
+      (key_len==(sizeof(KEY)-1) && !memcmp(key, KEY, key_len))
 
+#define KEYCPY \
+      if (buf_ptr - buf > 1) { *buf_ptr++ = ','; } \
+      *buf_ptr++ = '\"'; \
+      buf_ptr = mempcpy(buf_ptr, key, key_len); \
+      *buf_ptr++ = '\"'; \
+      *buf_ptr++ = ':';
 
-        if (key) {
-          if (KEYCMP("light")) {
-            const int light = !!atoi(a);
-            gpio_set_level(LIGHT_PIN, light);
-            KEYCPY("light")
-            buf[buf_len++] = '0' + (char)light;
-          } else
-          if (KEYCMP("fan")) {
-            const int fan = !!atoi(a);
-            gpio_set_level(FAN_PIN, fan);
-            KEYCPY("fan")
-            buf[buf_len++] = '0' + (char)fan;
-          } else
-          if (KEYCMP("led")) {
-            const int led = !!atoi(a);
-            gpio_set_level(LED_PIN, !/*inverted*/led);
-            KEYCPY("led")
-            buf[buf_len++] = '0' + (char)led;
-          }
-        }
-
-        if (c == '\0') break;
-        while (*++b == '&');
-        if (*b == '\0') break;
-        key = NULL;
-        a = b;
-      } else {
-        ++b;
+      if (KEYCMP("light") || KEYCMP("fan")) {
+        const char val = *a;
+        if (b - a != 1 || !(val == '0' || val == '1')) goto next;
+        gpio_set_level(LIGHT_PIN, val - '0');
+        KEYCPY
+        *buf_ptr++ = val;
+      } else
+      if (KEYCMP("led")) {
+        const char val = *a;
+        if (b - a != 1 || !(val == '0' || val == '1')) goto next;
+        gpio_set_level(LED_PIN, !(val - '0')); // inverted
+        KEYCPY
+        *buf_ptr++ = val;
       }
+
+next:
+      if (c == '\0') break;
+      while (*++b == '&');
+      if (*b == '\0') break;
+      key = NULL;
+      a = b;
+    } else {
+      ++b;
     }
+  }
 
 send:
-    buf[buf_len] = '}';
-    buf[++buf_len] = '\0';
+  *buf_ptr++ = '}';
+  *buf_ptr = '\0';
 
-    httpd_resp_set_type(req,HTTPD_TYPE_JSON);
-    httpd_resp_send(req,buf,buf_len);
-    return ESP_OK;
-  } else {
-    return httpd_resp_send_404(req);
-  }
+  httpd_resp_set_type(req, HTTPD_TYPE_JSON);
+  httpd_resp_send(req, buf, buf_ptr - buf);
+
+  return ESP_OK;
 }
 httpd_uri_t get_set_def = {
   .uri       = "/set",
@@ -343,82 +373,91 @@ httpd_uri_t get_set_def = {
   .user_ctx  = NULL
 };
 
-esp_err_t post_root(httpd_req_t* req) {
-  if (connected) { // TODO: always same pages
-    httpd_resp_set_status(req,"405 Method Not Allowed");
-    httpd_resp_send(req,"",0);
-    return ESP_OK;
-  } else {
-    char buf[sizeof(wifi_ssid)+sizeof(wifi_pass)];
-    // TODO: respond too much data received
-    int remaining = req->content_len;
+esp_err_t post_wifi(httpd_req_t* req) {
+  ssid_pass_t cred;
+  int remaining = req->content_len;
 
-    if (remaining > sizeof(buf))
+  if (remaining > sizeof(cred))
+    return ESP_FAIL;
+
+  for (char *p = &cred; remaining > 0;) {
+    const int ret = httpd_req_recv(req, p, remaining);
+    if (ret <= 0) { // Retry receiving if timeout occurred
+      if (ret == HTTPD_SOCK_ERR_TIMEOUT) continue;
       return ESP_FAIL;
-
-    for (char *p = buf; remaining > 0;) {
-      const int ret = httpd_req_recv(req, p, remaining);
-      if (ret <= 0) { // Retry receiving if timeout occurred
-        if (ret == HTTPD_SOCK_ERR_TIMEOUT) continue;
-        return ESP_FAIL;
-      }
-      p += ret;
-      remaining -= ret;
     }
+    p += ret;
+    remaining -= ret;
+  }
 
-    char *a = buf;
-    char *b = memchr(a,'\0',sizeof(wifi_ssid)); // TODO: n <= remaining
-    if (!b) goto bad_ssid;
-    ++b;
-    const size_t ssid_len = b-a;
-    if (ssid_len < 3 || sizeof(wifi_ssid) < ssid_len) { // TODO: no need for the second check
+  const char* response = NULL;
+
+  if (cred.ssid_len > MAX_SSID_LEN) {
+    response = "SSID must contain at most " STR(MAX_SSID_LEN) " bytes";
+    goto bad_request;
+  }
+
+
+
+bad_request:
+  httpd_resp_set_status(req, "400 Bad Request");
+  httpd_resp_send(req, response, strlen(response));
+
+  // ________________________________________________________________
+
+
+  char *a = buf;
+  char *b = memchr(a, '\0', MAX_SSID_LEN);
+  if (!b) goto bad_ssid;
+  ++b;
+  const size_t ssid_len = b-a;
+  if (ssid_len < 3 || MAX_SSID_LEN < ssid_len) { // TODO: no need for the second check
 bad_ssid:
-#define RESPONSE "SSID size must be [2," STR(MAX_SSID_STRLEN) ") bytes"
-      httpd_resp_set_status(req, "400 Bad Request");
-      httpd_resp_send(req, RESPONSE, sizeof(RESPONSE));
+#define RESPONSE "SSID size must be [2," STR(MAX_SSID_LEN) ") bytes"
+    httpd_resp_set_status(req, "400 Bad Request");
+    httpd_resp_send(req, RESPONSE, sizeof(RESPONSE));
 #undef RESPONSE
-      return ESP_OK;
-    }
-    memset(wifi_ssid,0,MAX_SSID_STRLEN); // zero out
-    memcpy(wifi_ssid,a,ssid_len);
-
-    a = b;
-    b = memchr(a,'\0',sizeof(wifi_pass)); // TODO: n <= remaining
-    if (!b) goto bad_pass;
-    ++b;
-    const size_t pass_len = b-a;
-    if (sizeof(wifi_pass) < pass_len) { // TODO: check above
-bad_pass:
-#define RESPONSE "Password size must be less than " STR(MAX_PASS_STRLEN) " bytes"
-      httpd_resp_set_status(req, "400 Bad Request");
-      httpd_resp_send(req, RESPONSE, sizeof(RESPONSE));
-#undef RESPONSE
-      return ESP_OK;
-    }
-    memset(wifi_pass,0,MAX_PASS_STRLEN); // zero out
-    memcpy(wifi_pass,a,pass_len);
-    new_ap = true;
-
-#define RESPONSE "Connecting to "
-    char resp[sizeof(RESPONSE)-1+sizeof(wifi_ssid)] = RESPONSE;
-    const size_t resp_len = sizeof(RESPONSE)-1 + ssid_len;
-    memcpy(resp+sizeof(RESPONSE)-1,wifi_ssid,ssid_len);
-#undef RESPONSE
-
-    httpd_resp_send(req, resp, resp_len);
-
-    esp_wifi_deauth_sta(0);
-    ESP_ERROR_CHECK(esp_wifi_stop());
-
-    start_station();
-
     return ESP_OK;
   }
+  memset(wifi_ssid,0,MAX_SSID_LEN); // zero out
+  memcpy(wifi_ssid,a,ssid_len);
+
+  a = b;
+  b = memchr(a,'\0',MAX_PASS_LEN); // TODO: n <= remaining
+  if (!b) goto bad_pass;
+  ++b;
+  const size_t pass_len = b-a;
+  if (MAX_PASS_LEN < pass_len) { // TODO: check above
+bad_pass:
+#define RESPONSE "Password size must be less than " STR(MAX_PASS_LEN) " bytes"
+    httpd_resp_set_status(req, "400 Bad Request");
+    httpd_resp_send(req, RESPONSE, sizeof(RESPONSE));
+#undef RESPONSE
+    return ESP_OK;
+  }
+  memset(wifi_pass,0,MAX_PASS_LEN); // zero out
+  memcpy(wifi_pass,a,pass_len);
+  new_ap = true;
+
+#define RESPONSE "Connecting to "
+  char resp[sizeof(RESPONSE)-1+MAX_SSID_LEN] = RESPONSE;
+  const size_t resp_len = sizeof(RESPONSE)-1 + ssid_len;
+  memcpy(resp+sizeof(RESPONSE)-1,wifi_ssid,ssid_len);
+#undef RESPONSE
+
+  httpd_resp_send(req, resp, resp_len);
+
+  esp_wifi_deauth_sta(0);
+  ESP_ERROR_CHECK(esp_wifi_stop());
+
+  start_station();
+
+  return ESP_OK;
 }
-httpd_uri_t post_root_def = {
-  .uri       = "/",
+httpd_uri_t post_wifi_def = {
+  .uri       = "/wifi",
   .method    = HTTP_POST,
-  .handler   = post_root,
+  .handler   = post_wifi,
   .user_ctx  = NULL
 };
 
@@ -531,7 +570,7 @@ static void station_event_handler(
 
       if (new_ap) {
         new_ap = false;
-        nvs_set_ssid_pass();
+        nvs_set_wifi_cred();
       }
     }
   }
@@ -554,8 +593,8 @@ esp_err_t start_station(void) {
   wifi_config_t wifi_config = {
     .sta = { }
   };
-  memcpy(wifi_config.sta.ssid    , wifi_ssid, MAX_SSID_STRLEN);
-  memcpy(wifi_config.sta.password, wifi_pass, MAX_PASS_STRLEN);
+  memcpy(wifi_config.sta.ssid    , wifi_ssid, MAX_SSID_LEN);
+  memcpy(wifi_config.sta.password, wifi_pass, MAX_PASS_LEN);
   if (wifi_pass[0]) {
     wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
   }
@@ -570,7 +609,7 @@ err:
   return err;
 }
 
-void init_http(void) {
+static void init_http(void) {
   tcpip_adapter_init();
 
   CHECK_OK_1(esp_netif_init());
@@ -585,7 +624,7 @@ void init_http(void) {
   // Set URI handlers
   // TODO: do defs need to persist?
   httpd_register_uri_handler(server, & get_root_def);
-  httpd_register_uri_handler(server, &post_root_def);
+  httpd_register_uri_handler(server, &post_wifi_def);
   httpd_register_uri_handler(server, & get_get_def);
   httpd_register_uri_handler(server, & get_set_def);
 
