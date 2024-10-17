@@ -48,6 +48,12 @@ const $ = (p, ...args) => {
 };
 const $$ = (...args) => p => $(p, ...args);
 
+const fetch_json = async url => {
+  const resp = await fetch(url, { referrer: '' });
+  if (!resp.ok) throw new Error(`${url}: ${resp.status} ${resp.statusText}`);
+  return await resp.json();
+};
+
 const all_inputs = { };
 
 const toggle = (id, val) => {
@@ -156,8 +162,7 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
               f(this);
             }
-            fetch('set?'+q.toString(),{ referrer: '' })
-            .then(resp => resp.json())
+            fetch_json('set?'+q.toString())
             .then(resp => {
               console.log(resp);
               if ('error' in resp) {
@@ -186,8 +191,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  fetch('get',{ referrer: '' })
-  .then(resp => resp.json())
+  fetch_json('get')
   .then(resp => {
     console.log(resp);
     if ('error' in resp) {
