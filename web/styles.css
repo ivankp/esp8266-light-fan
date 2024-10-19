@@ -128,9 +128,7 @@ input#light.on + .slider { background-color: #FFAE27; }
 input#fan.on   + .slider { background-color: #58B7EA; }
 
 #wifi { width: 1.5em; }
-#wifi circle { fill: red; }
-#wifi path { stroke: red; }
-#wifi.on circle { fill: green; }
-#wifi.on path { stroke: green; }
-#wifi:hover circle { fill: blue; }
-#wifi:hover path { stroke: blue; }
+#wifi circle { fill: DarkBlue; }
+#wifi path { stroke: DarkBlue; }
+#wifi:hover circle { fill: Blue; }
+#wifi:hover path { stroke: Blue; }

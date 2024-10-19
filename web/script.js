@@ -98,7 +98,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
               fetch('/',{
                 method: 'POST',
-                body: `${f.ssid}\0${f.pass}\0`
+                body: `${String.fromCharCode(f.ssid.length)}${f.ssid}${String.fromCharCode(f.pass.length)}${f.pass}`
               }).then(r => {
                 p.style.color = r.ok ? '#0A0' : ( disable(false), '#A00' );
                 return r.text();

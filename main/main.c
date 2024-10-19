@@ -54,13 +54,13 @@ extern const uint8_t index_page_end[] asm("_binary_index_html_gz_end");
 #define CHECK_OK(x) \
   if ((x) != ESP_OK) { goto err; }
 
-#if VERBOSITY > 0
+#if VERBOSITY >= 1
 #  define CHECK_OK_1 CHECK_OK_VERBOSE
 #else
 #  define CHECK_OK_1 CHECK_OK
 #endif
 
-#if VERBOSITY > 1
+#if VERBOSITY >= 2
 #  define CHECK_OK_2 CHECK_OK_VERBOSE
 #else
 #  define CHECK_OK_2 CHECK_OK

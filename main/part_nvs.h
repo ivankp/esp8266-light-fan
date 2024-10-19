@@ -10,12 +10,12 @@
 //     1 : password length
 //     n : password
 static uint8_t* wifi_cred = NULL;
+static size_t wifi_cred_len = 0;
 
 // https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/storage/nvs_flash.html
 static nvs_handle_t nvs_storage;
 
 static void get_wifi_cred(void) {
-  size_t wifi_cred_len = 0;
   CHECK_OK(nvs_get_blob(nvs_storage, "wifi_cred", NULL, &wifi_cred_len)); // get length
   if (wifi_cred) free(wifi_cred);
   wifi_cred = malloc(wifi_cred_len);
@@ -75,8 +75,9 @@ static void add_wifi_cred(const uint8_t* new_cred) {
 
   if (wifi_cred) free(wifi_cred);
   wifi_cred = p - new_len;
+  wifi_cred_len = new_len;
 
-  nvs_set_blob(nvs_storage, "wifi_cred", wifi_cred, new_len);
+  nvs_set_blob(nvs_storage, "wifi_cred", wifi_cred, wifi_cred_len);
 }
 
 static void init_nvs(void) {
@@ -93,6 +94,7 @@ static void init_nvs(void) {
 
   CHECK_OK_1(nvs_open("storage", NVS_READWRITE, &nvs_storage));
 
+  puts("getting wifi cred from nvs");
   get_wifi_cred();
 
 err: ;

@@ -87,4 +87,6 @@ static void init_gpio(void) {
 
   gpio_set_intr_type(LIGHT_SWITCH_PIN, GPIO_INTR_ANYEDGE);
   gpio_set_intr_type(  FAN_SWITCH_PIN, GPIO_INTR_ANYEDGE);
+
+  puts("gpio initialized");
 }

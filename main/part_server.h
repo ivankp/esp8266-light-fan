@@ -2,11 +2,11 @@
 // STA = station
 // stations connect to access points
 
-static bool new_ap = false;
-static int connected = 0;
+// static bool new_ap = false;
+static uint8_t connected = 0;
 
 esp_err_t start_access_point(void);
-esp_err_t start_station(void);
+esp_err_t start_station(const uint8_t* cred);
 
 static esp_err_t GET_(httpd_req_t* req) {
   httpd_resp_set_hdr(req,"Content-Encoding","gzip");
@@ -99,89 +99,67 @@ send:
   return ESP_OK;
 }
 
-/*
 static esp_err_t POST_connect(httpd_req_t* req) {
-  ssid_pass_t cred;
-  int remaining = req->content_len;
+  const char* response = "";
 
-  if (remaining > sizeof(cred))
-    return ESP_FAIL;
+  uint8_t buf[1+MAX_SSID_LEN+1+MAX_PASS_LEN];
+  ssize_t len = req->content_len;
 
-  for (char *p = &cred; remaining > 0;) {
-    const int ret = httpd_req_recv(req, p, remaining);
+  if (len > sizeof(buf))
+    goto bad_request;
+
+  for (uint8_t *p = buf; len > 0;) {
+    const int ret = httpd_req_recv(req, (char*)p, len);
     if (ret <= 0) { // Retry receiving if timeout occurred
       if (ret == HTTPD_SOCK_ERR_TIMEOUT) continue;
-      return ESP_FAIL;
+      goto server_error;
     }
     p += ret;
-    remaining -= ret;
+    len -= ret;
   }
+  len = req->content_len;
 
-  const char* response = NULL;
-
-  if (cred.ssid_len > MAX_SSID_LEN) {
-    response = "SSID must contain at most " STR(MAX_SSID_LEN) " bytes";
+  const size_t ssid_len = buf[0];
+  if (ssid_len > MAX_SSID_LEN) {
+    response = "SSID max length is " STR(MAX_SSID_LEN) " bytes";
     goto bad_request;
   }
+  size_t pass_len = 0;
+  const bool no_pass = len == ssid_len + 1;
+  if (!no_pass) {
+    if (len < ssid_len + 2)
+      goto bad_request;
+    pass_len = buf[ssid_len+1];
+    if (pass_len > MAX_PASS_LEN) {
+      response = "PASS max length is " STR(MAX_PASS_LEN) " bytes";
+      goto bad_request;
+    }
+    if (len != ssid_len + pass_len + 2)
+      goto bad_request;
+  }
 
-
-
-bad_request:
-  httpd_resp_set_status(req, "400 Bad Request");
+  response = "Connecting";
   httpd_resp_send(req, response, strlen(response));
 
-  // ________________________________________________________________
-
-
-  char *a = buf;
-  char *b = memchr(a, '\0', MAX_SSID_LEN);
-  if (!b) goto bad_ssid;
-  ++b;
-  const size_t ssid_len = b-a;
-  if (ssid_len < 3 || MAX_SSID_LEN < ssid_len) { // TODO: no need for the second check
-bad_ssid:
-#define RESPONSE "SSID size must be [2," STR(MAX_SSID_LEN) ") bytes"
-    httpd_resp_set_status(req, "400 Bad Request");
-    httpd_resp_send(req, RESPONSE, sizeof(RESPONSE));
-#undef RESPONSE
-    return ESP_OK;
-  }
-  memset(wifi_ssid,0,MAX_SSID_LEN); // zero out
-  memcpy(wifi_ssid,a,ssid_len);
-
-  a = b;
-  b = memchr(a,'\0',MAX_PASS_LEN); // TODO: n <= remaining
-  if (!b) goto bad_pass;
-  ++b;
-  const size_t pass_len = b-a;
-  if (MAX_PASS_LEN < pass_len) { // TODO: check above
-bad_pass:
-#define RESPONSE "Password size must be less than " STR(MAX_PASS_LEN) " bytes"
-    httpd_resp_set_status(req, "400 Bad Request");
-    httpd_resp_send(req, RESPONSE, sizeof(RESPONSE));
-#undef RESPONSE
-    return ESP_OK;
-  }
-  memset(wifi_pass,0,MAX_PASS_LEN); // zero out
-  memcpy(wifi_pass,a,pass_len);
-  new_ap = true;
-
-#define RESPONSE "Connecting to "
-  char resp[sizeof(RESPONSE)-1+MAX_SSID_LEN] = RESPONSE;
-  const size_t resp_len = sizeof(RESPONSE)-1 + ssid_len;
-  memcpy(resp+sizeof(RESPONSE)-1,wifi_ssid,ssid_len);
-#undef RESPONSE
-
-  httpd_resp_send(req, resp, resp_len);
+  return ESP_OK; // TODO: remove when ready
 
   esp_wifi_deauth_sta(0);
-  ESP_ERROR_CHECK(esp_wifi_stop());
+  CHECK_OK(esp_wifi_stop());
 
-  start_station();
+  // TODO: if (no_pass) find ssid in wifi_cred
 
-  return ESP_OK;
+  return start_station(buf);
+
+bad_request:
+  httpd_resp_set_status(req, HTTPD_400);
+  return httpd_resp_send(req, response, strlen(response));
+
+server_error:
+  httpd_resp_send_500(req);
+
+err:
+  return ESP_FAIL;
 }
-*/
 
 esp_err_t start_access_point(void) {
   connected = 0;
@@ -195,7 +173,7 @@ esp_err_t start_access_point(void) {
       .ssid_len = sizeof(AP_SSID) - 1,
       .password = AP_PASS,
       .max_connection = MAX_CONN,
-      .authmode = strlen(AP_PASS) ? WIFI_AUTH_WPA_WPA2_PSK : WIFI_AUTH_OPEN
+      .authmode = sizeof(AP_PASS) > 1 ? WIFI_AUTH_WPA_WPA2_PSK : WIFI_AUTH_OPEN
     }
   };
 
@@ -227,7 +205,7 @@ static void station_reconnect_timer_callback(void *arg) {
   esp_wifi_connect();
 }
 
-static void station_event_handler(
+static void station_event_handler( // TODO
   void* arg,
   esp_event_base_t event_base,
   int32_t event_id,
@@ -285,15 +263,15 @@ static void station_event_handler(
       puts("Obtained IP address");
       puts(ip4addr_ntoa(&event->ip_info.ip));
 
-      if (new_ap) {
-        new_ap = false;
-        // TODO: add_wifi_cred();
-      }
+      // if (new_ap) {
+      //   new_ap = false;
+      //   // TODO: add_wifi_cred();
+      // }
     }
   }
 }
 
-esp_err_t start_station(void) {
+esp_err_t start_station(const uint8_t* cred) {
   // TODO: try all credentials
   connected = 1;
 
@@ -349,16 +327,18 @@ static void init_server(void) {
     httpd_register_uri_handler(server, &handler); \
   }
 
-  ADD_PAGE(GET , )
-  // ADD_PAGE(POST, connect)
-  ADD_PAGE(GET , get)
-  ADD_PAGE(GET , set)
+  ADD_PAGE(GET, )
+  ADD_PAGE(GET, get)
+  ADD_PAGE(GET, set)
+
+  ADD_PAGE(POST, connect)
 
 #undef ADD_PAGE
 
   // Start WiFi
-  // TODO: start_station()
+  // TODO: start_station(NULL)
 
+  puts("starting access point");
   start_access_point();
 
 err: ;
