@@ -112,8 +112,10 @@ static esp_err_t POST_connect(httpd_req_t* req) {
     goto wifi_cred;
   }
 
-  if (len > sizeof(buf))
+  if (len > sizeof(buf)) {
+    response = "SSID or PASS is too long";
     goto bad_request;
+  }
 
   for (char *p = buf; len;) {
     const int ret = httpd_req_recv(req, p, len);

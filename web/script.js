@@ -49,14 +49,19 @@ const $ = (p, ...args) => {
 const $$ = (...args) => p => $(p, ...args);
 
 const fetch_json = async url => {
-  const resp = await fetch(url, { referrer: '' });
-  if (!resp.ok) throw new Error(`${url}: ${resp.status} ${resp.statusText}`);
-  return await resp.json();
+  try {
+    const resp = await fetch(url, { referrer: '' });
+    if (!resp.ok) throw new Error(`${resp.status} ${resp.statusText}`);
+    return await resp.json();
+  } catch (e) {
+    alert(`${url}: ${e.message}`);
+    throw e;
+  }
 };
 
 const all_inputs = { };
 
-const toggle = (id, val) => {
+const toggle = ([id, val]) => {
   const input = all_inputs[id];
   if (input) {
     if (input.old = input.checked = val) input.classList.add('on');
@@ -90,25 +95,25 @@ document.addEventListener('DOMContentLoaded', () => {
             submit: e => {
               e.preventDefault();
 
-              const f = e.target.elements;
+              const f = e.target.elements; // form elements
               const p = e.target.querySelector('p');
+              p.textContent = '';
 
               const disable = b => { for (const x of f) x.disabled = b; };
               disable(true);
-
-              console.log([f.ssid.value, f.pass.value]);
 
               fetch('/connect',{
                 method: 'POST',
                 referrer: '',
                 body: `${f.ssid.value}\0${f.pass.value}\0`
               }).then(r => {
-                p.style.color = r.ok ? '#0A0' : ( disable(false), '#A00' );
+                disable(false);
+                p.style.color = r.ok ? '#0A0' : '#A00';
                 return r.text();
               }).then(t => {
                 p.textContent = t;
               }).catch(e => {
-                alert(e);
+                alert(`connect: ${e.message}`);
                 disable(false);
                 f.pass.select();
                 throw e;
@@ -155,7 +160,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 x.checked = x.old;
             };
             const f = input => {
-              q.set(input.id,input.checked?'1':'0');
+              q.set(input.id, input.checked ? '1' : '0');
               modified.push(input);
             };
             if (one) {
@@ -169,13 +174,11 @@ document.addEventListener('DOMContentLoaded', () => {
             fetch_json('set?'+q.toString())
             .then(resp => {
               console.log(resp);
-              for (const [key,val] of Object.entries(resp))
-                toggle(key,val);
+              Object.entries(resp).forEach(toggle);
               for (const x of modified)
                 if (!(x.id in resp)) x.checked = x.old;
             })
             .catch(e => {
-              alert('Request failed');
               restore();
               throw e;
             });
@@ -193,11 +196,6 @@ document.addEventListener('DOMContentLoaded', () => {
   fetch_json('get')
   .then(resp => {
     console.log(resp);
-    for (const [key,val] of Object.entries(resp))
-      toggle(key,val);
-  })
-  .catch(e => {
-    alert('Request failed');
-    throw e;
+    Object.entries(resp).forEach(toggle);
   });
 });
