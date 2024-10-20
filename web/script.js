@@ -91,23 +91,27 @@ document.addEventListener('DOMContentLoaded', () => {
               e.preventDefault();
 
               const f = e.target.elements;
-              const p = e.target.querySelectorAll('p');
+              const p = e.target.querySelector('p');
 
               const disable = b => { for (const x of f) x.disabled = b; };
               disable(true);
 
-              fetch('/',{
+              console.log([f.ssid.value, f.pass.value]);
+
+              fetch('/connect',{
                 method: 'POST',
-                body: `${String.fromCharCode(f.ssid.length)}${f.ssid}${String.fromCharCode(f.pass.length)}${f.pass}`
+                referrer: '',
+                body: `${f.ssid.value}\0${f.pass.value}\0`
               }).then(r => {
                 p.style.color = r.ok ? '#0A0' : ( disable(false), '#A00' );
                 return r.text();
-              }).then(d => {
-                p.textContent = d;
-              }).catch(d => {
-                alert(d);
+              }).then(t => {
+                p.textContent = t;
+              }).catch(e => {
+                alert(e);
                 disable(false);
                 f.pass.select();
+                throw e;
               });
             }
           }},
@@ -165,15 +169,10 @@ document.addEventListener('DOMContentLoaded', () => {
             fetch_json('set?'+q.toString())
             .then(resp => {
               console.log(resp);
-              if ('error' in resp) {
-                alert(resp.error);
-                restore();
-              } else {
-                for (const [key,val] of Object.entries(resp))
-                  toggle(key,val);
-                for (const x of modified)
-                  if (!(x.id in resp)) x.checked = x.old;
-              }
+              for (const [key,val] of Object.entries(resp))
+                toggle(key,val);
+              for (const x of modified)
+                if (!(x.id in resp)) x.checked = x.old;
             })
             .catch(e => {
               alert('Request failed');
@@ -194,12 +193,8 @@ document.addEventListener('DOMContentLoaded', () => {
   fetch_json('get')
   .then(resp => {
     console.log(resp);
-    if ('error' in resp) {
-      alert(resp.error);
-    } else {
-      for (const [key,val] of Object.entries(resp))
-        toggle(key,val);
-    }
+    for (const [key,val] of Object.entries(resp))
+      toggle(key,val);
   })
   .catch(e => {
     alert('Request failed');

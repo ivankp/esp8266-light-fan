@@ -66,6 +66,9 @@ extern const uint8_t index_page_end[] asm("_binary_index_html_gz_end");
 #  define CHECK_OK_2 CHECK_OK
 #endif
 
+#define MIN(a, b) ((a) < (b) ? a : b)
+#define MAX(a, b) ((a) > (b) ? a : b)
+
 #include "part_gpio.h"
 #include "part_nvs.h"
 #include "part_server.h"

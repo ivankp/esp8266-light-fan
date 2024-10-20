@@ -9,7 +9,7 @@
 //     n : ssid
 //     1 : password length
 //     n : password
-static uint8_t* wifi_cred = NULL;
+static char* wifi_cred = NULL;
 static size_t wifi_cred_len = 0;
 
 // https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/storage/nvs_flash.html
@@ -28,6 +28,7 @@ err:
   wifi_cred = NULL;
 }
 
+/*
 static void add_wifi_cred(const uint8_t* new_cred) {
   const uint8_t  new_ssid_len = *new_cred++;
   const uint8_t* new_ssid = new_cred;
@@ -79,6 +80,7 @@ static void add_wifi_cred(const uint8_t* new_cred) {
 
   nvs_set_blob(nvs_storage, "wifi_cred", wifi_cred, wifi_cred_len);
 }
+*/
 
 static void init_nvs(void) {
   // https://github.com/espressif/esp-idf/blob/cf7e743a9b2e5fd2520be4ad047c8584188d54da/examples/storage/nvs_rw_value/main/nvs_value_example_main.c

@@ -49,6 +49,9 @@ form > * {
 form label > span {
   margin-right: 0.5em;
 }
+form p {
+  font-size: small;
+}
 
 .close {
   position: absolute;

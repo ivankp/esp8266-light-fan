@@ -6,7 +6,7 @@
 static uint8_t connected = 0;
 
 esp_err_t start_access_point(void);
-esp_err_t start_station(const uint8_t* cred);
+esp_err_t start_station(const char* ssid, const char* pass);
 
 static esp_err_t GET_(httpd_req_t* req) {
   httpd_resp_set_hdr(req,"Content-Encoding","gzip");
@@ -99,17 +99,24 @@ send:
   return ESP_OK;
 }
 
+// WiFi standard allows arbitrary SSID and PASS bytes
+// But esp firmware library relies on them being null terminated
+
 static esp_err_t POST_connect(httpd_req_t* req) {
   const char* response = "";
+  char *ssid = NULL, *pass = NULL;
+  char buf[MAX_SSID_LEN+1+MAX_PASS_LEN+1] = { '\0' };
 
-  uint8_t buf[1+MAX_SSID_LEN+1+MAX_PASS_LEN];
-  ssize_t len = req->content_len;
+  size_t len = req->content_len;
+  if (len == 0) {
+    goto wifi_cred;
+  }
 
   if (len > sizeof(buf))
     goto bad_request;
 
-  for (uint8_t *p = buf; len > 0;) {
-    const int ret = httpd_req_recv(req, (char*)p, len);
+  for (char *p = buf; len;) {
+    const int ret = httpd_req_recv(req, p, len);
     if (ret <= 0) { // Retry receiving if timeout occurred
       if (ret == HTTPD_SOCK_ERR_TIMEOUT) continue;
       goto server_error;
@@ -119,36 +126,45 @@ static esp_err_t POST_connect(httpd_req_t* req) {
   }
   len = req->content_len;
 
-  const size_t ssid_len = buf[0];
-  if (ssid_len > MAX_SSID_LEN) {
-    response = "SSID max length is " STR(MAX_SSID_LEN) " bytes";
+  pass = memchr((ssid = buf), '\0', MIN(len, MAX_SSID_LEN+1));
+  if (!pass) {
+    response = "SSID not terminated or longer than " STR(MAX_SSID_LEN) " bytes";
     goto bad_request;
   }
-  size_t pass_len = 0;
-  const bool no_pass = len == ssid_len + 1;
-  if (!no_pass) {
-    if (len < ssid_len + 2)
-      goto bad_request;
-    pass_len = buf[ssid_len+1];
-    if (pass_len > MAX_PASS_LEN) {
-      response = "PASS max length is " STR(MAX_PASS_LEN) " bytes";
-      goto bad_request;
-    }
-    if (len != ssid_len + pass_len + 2)
-      goto bad_request;
+  ++pass; // move past null byte
+
+  len -= pass - ssid;
+  if (len == 0) {
+    pass = NULL;
+    goto wifi_cred;
+  }
+  if (!memchr(pass, '\0', MIN(len, MAX_PASS_LEN+1))) {
+    response = "PASS not terminated or longer than " STR(MAX_PASS_LEN) " bytes";
+    goto bad_request;
   }
 
-  response = "Connecting";
-  httpd_resp_send(req, response, strlen(response));
+connect:
+  {
+#define PREFIX "Connecting to "
+    char response[sizeof(PREFIX) + MAX_SSID_LEN] = PREFIX;
+    char* end = mempcpy(response + sizeof(PREFIX) - 1, ssid, strlen(ssid));
+#undef PREFIX
+    httpd_resp_send(req, response, end - response);
+  }
 
   return ESP_OK; // TODO: remove when ready
 
   esp_wifi_deauth_sta(0);
   CHECK_OK(esp_wifi_stop());
 
-  // TODO: if (no_pass) find ssid in wifi_cred
+  return start_station(ssid, pass);
 
-  return start_station(buf);
+wifi_cred:
+  if (wifi_cred) {
+    if (!ssid) ssid = wifi_cred;
+    goto connect;
+  }
+  response = "no stored wifi credentials";
 
 bad_request:
   httpd_resp_set_status(req, HTTPD_400);
@@ -271,7 +287,7 @@ static void station_event_handler( // TODO
   }
 }
 
-esp_err_t start_station(const uint8_t* cred) {
+esp_err_t start_station(const char* ssid, const char* pass) {
   // TODO: try all credentials
   connected = 1;
 
