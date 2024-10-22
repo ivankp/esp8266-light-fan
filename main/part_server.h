@@ -6,7 +6,7 @@
 static uint8_t connected = 0;
 
 esp_err_t start_access_point(void);
-esp_err_t start_station(const char* ssid, const char* pass);
+esp_err_t start_station(const char* ssid);
 
 static esp_err_t GET_(httpd_req_t* req) {
   httpd_resp_set_hdr(req,"Content-Encoding","gzip");
@@ -104,13 +104,11 @@ send:
 
 static esp_err_t POST_connect(httpd_req_t* req) {
   const char* response = "";
-  char *ssid = NULL, *pass = NULL;
+  const char *ssid = NULL;
   char buf[MAX_SSID_LEN+1+MAX_PASS_LEN+1] = { '\0' };
 
   size_t len = req->content_len;
-  if (len == 0) {
-    goto wifi_cred;
-  }
+  if (len == 0) goto wifi_cred;
 
   if (len > sizeof(buf)) {
     response = "SSID or PASS is too long";
@@ -128,7 +126,8 @@ static esp_err_t POST_connect(httpd_req_t* req) {
   }
   len = req->content_len;
 
-  pass = memchr((ssid = buf), '\0', MIN(len, MAX_SSID_LEN+1));
+  ssid = buf;
+  const char* pass = memchr(ssid, '\0', MIN(len, MAX_SSID_LEN+1));
   if (!pass) {
     response = "SSID not terminated or longer than " STR(MAX_SSID_LEN) " bytes";
     goto bad_request;
@@ -137,7 +136,6 @@ static esp_err_t POST_connect(httpd_req_t* req) {
 
   len -= pass - ssid;
   if (len == 0) {
-    pass = NULL;
     goto wifi_cred;
   }
   if (!memchr(pass, '\0', MIN(len, MAX_PASS_LEN+1))) {
@@ -159,14 +157,24 @@ connect:
   esp_wifi_deauth_sta(0);
   CHECK_OK(esp_wifi_stop());
 
-  return start_station(ssid, pass);
+  return start_station(ssid);
 
 wifi_cred:
-  if (wifi_cred) {
-    if (!ssid) ssid = wifi_cred;
-    goto connect;
+  if (!ssid) {
+    // use the latest credentials if no ssid requested
+    ssid = wifi_cred;
+    if (!ssid) {
+      response = "No known SSIDs";
+      goto bad_request;
+    }
+  } else {
+    ssid = find_wifi_cred(ssid);
+    if (!ssid) {
+      response = "Not a known SSID";
+      goto bad_request;
+    }
   }
-  response = "no stored wifi credentials";
+  goto connect;
 
 bad_request:
   httpd_resp_set_status(req, HTTPD_400);
@@ -289,7 +297,7 @@ static void station_event_handler( // TODO
   }
 }
 
-esp_err_t start_station(const char* ssid, const char* pass) {
+esp_err_t start_station(const char* ssid) {
   // TODO: try all credentials
   connected = 1;
 
@@ -356,7 +364,6 @@ static void init_server(void) {
   // Start WiFi
   // TODO: start_station(NULL)
 
-  puts("starting access point");
   start_access_point();
 
 err: ;

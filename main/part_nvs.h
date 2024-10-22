@@ -17,70 +17,84 @@ static nvs_handle_t nvs_storage;
 
 static void get_wifi_cred(void) {
   CHECK_OK(nvs_get_blob(nvs_storage, "wifi_cred", NULL, &wifi_cred_len)); // get length
+  if (wifi_cred_len == 0) goto err;
   if (wifi_cred) free(wifi_cred);
   wifi_cred = malloc(wifi_cred_len);
   CHECK_OK(nvs_get_blob(nvs_storage, "wifi_cred", &wifi_cred, &wifi_cred_len)); // get data
+  if (wifi_cred[wifi_cred_len-1] != '\0') {
+    // corrupted wifi_cred
+    nvs_erase_key(nvs_storage, "wifi_cred");
+    goto err;
+  }
 
   return;
 err:
   // no valid credentials are available
   if (wifi_cred) free(wifi_cred);
   wifi_cred = NULL;
+  wifi_cred_len = 0;
 }
 
-/*
-static void add_wifi_cred(const uint8_t* new_cred) {
-  const uint8_t  new_ssid_len = *new_cred++;
-  const uint8_t* new_ssid = new_cred;
-  new_cred += new_ssid_len;
-  const uint8_t  new_pass_len = *new_cred++;
-  const uint8_t* new_pass = new_cred;
-  new_cred = new_ssid - 1;
+static const char* find_wifi_cred(const char* ssid) {
+  const char* a = wifi_cred;
+  const uint8_t ncreds = a ? *(uint8_t*)(a++) : 0;
 
-  const uint8_t* a = wifi_cred;
-  uint8_t ncreds = a ? *a++ : 0;
+  for (uint8_t i = 0; i < ncreds; ++i) {
+    if (!strcmp(a, ssid)) return a;
+    a += strlen(a) + 1;
+    a += strlen(a) + 1;
+  }
+  return NULL;
+}
 
-  const uint8_t *b = a, *c = a, *d = a, *e = a;
+static void add_wifi_cred(const char* cred) {
+  uint8_t cred_len = strlen(cred);
+  const char* pass = cred + cred_len + 1;
+  cred_len += strlen(pass) + 1;
+
+  const char* a = wifi_cred;
+  uint8_t ncreds = a ? *(uint8_t*)(a++) : 0;
+
+  const char *b = a, *c = a, *d = a, *e = a;
   for (uint8_t i = 0; i < ncreds; ++i) {
     d = e;
-    const uint8_t ssid_len = *e++;
-    if (b == a && ssid_len == new_ssid_len && !memcmp(e, new_ssid, ssid_len)) {
-      c = e + ssid_len;
-      const uint8_t pass_len = *c++;
-      if (d == a && pass_len == new_pass_len && !memcmp(c, new_pass, pass_len)) {
+    const uint8_t ssid_len = strlen(e);
+    e += ssid_len + 1;
+    const uint8_t pass_len = strlen(e);
+    if (c == a && !strcmp(d, cred)) {
+      if (d == a && !strcmp(e, pass))
         return; // same ssid and pass in first credential
-      }
       b = d;
-      c += pass_len;
+      e += pass_len + 1;
+      c = e;
+    } else {
+      e += pass_len + 1;
     }
-    e += ssid_len; // skip ssid
-    const uint8_t pass_len = *e++;
-    e += pass_len; // skip pass
   }
 
-  if (ncreds > 7 && c == a) e = d;
+  if (c == a) { // new ssid
+    if (ncreds < MAX_CRED) ++ncreds; // add new credentials
+    else e = d; // also remove oldest unused credentials
+  }
+  // if ssid is already on file, ncreds stays the same
+  // and records only need to be moved, not removed
 
-  size_t new_len = 3; // ncreds, new_ssid_len, new_pass_len
-  new_len += new_ssid_len;
-  new_len += new_pass_len;
-  new_len += b - a;
-  new_len += e - c;
+  wifi_cred_len = 1; // ncreds
+  wifi_cred_len += cred_len;
+  wifi_cred_len += b - a;
+  wifi_cred_len += e - c;
 
-  if (ncreds < 8 && c == a) ++ncreds;
-
-  uint8_t* p = malloc(new_len);
-  *p++ = ncreds;
-  p = mempcpy(p, new_cred, new_ssid_len + new_pass_len + 2);
+  char* p = malloc(wifi_cred_len);
+  *(uint8_t*)(p++) = ncreds;
+  p = mempcpy(p, cred, cred_len);
   p = mempcpy(p, a, b - a);
   p = mempcpy(p, c, e - c);
 
   if (wifi_cred) free(wifi_cred);
-  wifi_cred = p - new_len;
-  wifi_cred_len = new_len;
+  wifi_cred = p - wifi_cred_len;
 
   nvs_set_blob(nvs_storage, "wifi_cred", wifi_cred, wifi_cred_len);
 }
-*/
 
 static void init_nvs(void) {
   // https://github.com/espressif/esp-idf/blob/cf7e743a9b2e5fd2520be4ad047c8584188d54da/examples/storage/nvs_rw_value/main/nvs_value_example_main.c
@@ -96,7 +110,6 @@ static void init_nvs(void) {
 
   CHECK_OK_1(nvs_open("storage", NVS_READWRITE, &nvs_storage));
 
-  puts("getting wifi cred from nvs");
   get_wifi_cred();
 
 err: ;
