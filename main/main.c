@@ -32,11 +32,13 @@
 #define FAN_SWITCH_PIN 14
 
 // default Access Point IP address: 192.168.4.1
-#define AP_SSID  "light-and-fan"
-#define AP_PASS  "automation"
+#define AP_SSID "light-and-fan"
+#define AP_PASS "automation"
 #define MAX_CONN 4
 
 #define MAX_CRED 8
+#define MAX_STATION_ATTEMPTS 2
+#define MAX_STATION_DELAYED_ATTEMPTS 8
 
 // embedded static files
 extern const uint8_t index_page[] asm("_binary_index_html_gz_start");

@@ -2,11 +2,22 @@
 // STA = station
 // stations connect to access points
 
-// static bool new_ap = false;
-static uint8_t connected = 0;
+// WiFi connection behavior
+// ============================================================================
+// Cause     | N saved | Effect                        | Handler
+// ----------------------------------------------------------------------------
+// Boot up   | N =  0  | AP                            | init_server
+// Boot up   | N >= 1  | Try first saved, else AP      | start_station
+// Blank req | N =  0  | Error                         | POST_connect
+// Blank req | N >= 1  | Try each saved once, else AP  | start_station
+// Req SSID  | N =  0  | Error                         | POST_connect
+// Req SSID  | N >= 1  | Try STA once, else prev state | start_station
+// Req S & P | N =  0  | Try STA once, else prev state | start_station
+// Req S & P | N >= 1  | Try STA once, else prev state | start_station
+// ----------------------------------------------------------------------------
 
 esp_err_t start_access_point(void);
-esp_err_t start_station(const char* ssid);
+esp_err_t start_station(const char* cred);
 
 static esp_err_t GET_(httpd_req_t* req) {
   httpd_resp_set_hdr(req,"Content-Encoding","gzip");
@@ -147,7 +158,8 @@ connect:
   {
 #define PREFIX "Connecting to "
     char response[sizeof(PREFIX) + MAX_SSID_LEN] = PREFIX;
-    char* end = mempcpy(response + sizeof(PREFIX) - 1, ssid, strlen(ssid));
+    const char* name = ssid ? ssid : wifi_cred;
+    char* end = mempcpy(response + sizeof(PREFIX) - 1, name, strlen(name));
 #undef PREFIX
     httpd_resp_send(req, response, end - response);
   }
@@ -161,9 +173,8 @@ connect:
 
 wifi_cred:
   if (!ssid) {
-    // use the latest credentials if no ssid requested
-    ssid = wifi_cred;
-    if (!ssid) {
+    // use saved credentials if no ssid requested
+    if (!wifi_cred) {
       response = "No known SSIDs";
       goto bad_request;
     }
@@ -187,9 +198,125 @@ err:
   return ESP_FAIL;
 }
 
-esp_err_t start_access_point(void) {
-  connected = 0;
+// https://docs.espressif.com/projects/esp-idf/en/v4.0.3/api-reference/network/esp_wifi.html
+// https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-guides/wifi.html
 
+#define WIFI_CONNECTED_BIT BIT0
+#define WIFI_FAIL_BIT      BIT1
+
+static TimerHandle_t station_reconnect_timer = NULL;
+
+static void station_reconnect_timer_callback(void* arg) {
+  esp_wifi_connect();
+}
+
+static void station_event_handler(
+  void* arg, /* try_all_saved, 0 or 1 */ // TODO
+  esp_event_base_t event_base,
+  int32_t event_id,
+  void* event_data
+) {
+  // TODO: handle cycling through saved creds
+  static uint8_t attempt = 0;
+  static uint8_t delayed_attempt = 0;
+  if (event_base == WIFI_EVENT) {
+    if (event_id == WIFI_EVENT_STA_START) {
+      esp_wifi_connect();
+    } else if (event_id == WIFI_EVENT_STA_DISCONNECTED) {
+      if (attempt < MAX_STATION_ATTEMPTS) {
+        ++attempt;
+        puts("Retrying AP connection");
+        esp_wifi_connect();
+        // WIFI_EVENT_STA_DISCONNECTED is triggered by esp_wifi_connect()
+        // if it fails
+      } else { // try to connect after a delay
+        attempt = 0;
+        puts("AP connection failed");
+        if (delayed_attempt < MAX_STATION_DELAYED_ATTEMPTS) {
+          ++delayed_attempt;
+          puts("Attempting to reconnect in 1 minute");
+          if (!station_reconnect_timer) {
+            station_reconnect_timer = xTimerCreate/*Static*/(
+              "",
+              60000 / portTICK_PERIOD_MS, // period in ticks
+              pdFALSE, // not periodic
+              (void*) 0, // timer id
+              station_reconnect_timer_callback
+            );
+          }
+          xTimerStart(station_reconnect_timer, 0);
+        } else {
+          delayed_attempt = 0;
+          if (station_reconnect_timer)
+            xTimerDelete(station_reconnect_timer, 0);
+
+          ESP_ERROR_CHECK(esp_event_handler_unregister(
+            IP_EVENT, IP_EVENT_STA_GOT_IP, &station_event_handler
+          ));
+          ESP_ERROR_CHECK(esp_event_handler_unregister(
+            WIFI_EVENT, ESP_EVENT_ANY_ID, &station_event_handler
+          ));
+
+          // Switch back to AP mode if connection failed
+          ESP_ERROR_CHECK(esp_wifi_stop());
+          start_access_point();
+        }
+      }
+    }
+  } else if (event_base == IP_EVENT) {
+    if (event_id == IP_EVENT_STA_GOT_IP) {
+      attempt = 0;
+      delayed_attempt = 0;
+
+      ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
+      puts("Station IP address:");
+      puts(ip4addr_ntoa(&event->ip_info.ip));
+
+      add_wifi_cred(arg);
+    }
+  }
+}
+
+esp_err_t start_station(const char* ssid) {
+  uint8_t try_all_saved = 0;
+  if (!ssid) {
+    if (!(ssid = wifi_cred)) return ESP_FAIL;
+    try_all_saved = 1;
+  }
+
+  // the function is always called with ssid\0pass\0
+  const uint8_t ssid_len = strlen(ssid);
+  const char* pass = ssid + ssid_len + 1;
+  const uint8_t pass_len = strlen(pass);
+
+  wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+  CHECK_OK(esp_wifi_init(&cfg));
+
+  CHECK_OK(esp_event_handler_register(
+    WIFI_EVENT, ESP_EVENT_ANY_ID, &station_event_handler, (void*) try_all_saved
+  ));
+  CHECK_OK(esp_event_handler_register(
+    IP_EVENT, IP_EVENT_STA_GOT_IP, &station_event_handler, (void*) try_all_saved
+  ));
+
+  wifi_config_t wifi_config = { .sta = { } };
+  memcpy(wifi_config.sta.ssid, ssid, ssid_len);
+  if (pass_len) {
+    memcpy(wifi_config.sta.password, pass, strlen(pass));
+    wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+  }
+
+  CHECK_OK(esp_wifi_set_mode(WIFI_MODE_STA));
+  CHECK_OK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config));
+  CHECK_OK_1(esp_wifi_start());
+
+  return ESP_OK;
+err:
+  esp_wifi_stop();
+  return ESP_FAIL;
+}
+
+esp_err_t start_access_point(void) {
   wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
   CHECK_OK(esp_wifi_init(&cfg));
 
@@ -210,120 +337,8 @@ esp_err_t start_access_point(void) {
   tcpip_adapter_ip_info_t ip_info;
   tcpip_adapter_get_ip_info(TCPIP_ADAPTER_IF_AP, &ip_info);
 
-  puts("Access point IP address");
+  puts("Access point IP address:");
   puts(ip4addr_ntoa(&ip_info.ip));
-
-  return ESP_OK;
-err:
-  esp_wifi_stop();
-  return ESP_FAIL;
-}
-
-// https://docs.espressif.com/projects/esp-idf/en/v4.0.3/api-reference/network/esp_wifi.html
-// https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-guides/wifi.html
-
-#define WIFI_CONNECTED_BIT BIT0
-#define WIFI_FAIL_BIT      BIT1
-
-static TimerHandle_t station_reconnect_timer = NULL;
-
-static void station_reconnect_timer_callback(void *arg) {
-  esp_wifi_connect();
-}
-
-static void station_event_handler( // TODO
-  void* arg,
-  esp_event_base_t event_base,
-  int32_t event_id,
-  void* event_data
-) {
-  static int attempt = 0;
-  if (event_base == WIFI_EVENT) {
-    if (event_id == WIFI_EVENT_STA_START) {
-      esp_wifi_connect();
-    } else if (event_id == WIFI_EVENT_STA_DISCONNECTED) {
-      if (attempt < 5) { // max consecutive attempts
-        ++attempt;
-        puts("Retrying AP connection");
-        esp_wifi_connect();
-        // WIFI_EVENT_STA_DISCONNECTED is triggered by esp_wifi_connect()
-        // if it fails
-      } else {
-        attempt = 0;
-        puts("AP connection failed");
-        if (--connected <= 0) {
-          if (station_reconnect_timer)
-            xTimerDelete(station_reconnect_timer, 0);
-
-          ESP_ERROR_CHECK(esp_event_handler_unregister(
-            IP_EVENT, IP_EVENT_STA_GOT_IP, &station_event_handler
-          ));
-          ESP_ERROR_CHECK(esp_event_handler_unregister(
-            WIFI_EVENT, ESP_EVENT_ANY_ID, &station_event_handler
-          ));
-
-          // Switch back to AP mode if connection failed
-          ESP_ERROR_CHECK(esp_wifi_stop());
-          start_access_point();
-        } else {
-          puts("Attempting to reconnect in 1 minute");
-          if (!station_reconnect_timer) {
-            station_reconnect_timer = xTimerCreate/*Static*/(
-              "",
-              60000 / portTICK_PERIOD_MS, // period in ticks
-              pdFALSE, // not periodic
-              (void*) 0, // timer id
-              station_reconnect_timer_callback
-            );
-          }
-          xTimerStart(station_reconnect_timer, 0);
-        }
-      }
-    }
-  } else if (event_base == IP_EVENT) {
-    if (event_id == IP_EVENT_STA_GOT_IP) {
-      attempt = 0;
-      connected = 8;
-
-      ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
-      puts("Obtained IP address");
-      puts(ip4addr_ntoa(&event->ip_info.ip));
-
-      // if (new_ap) {
-      //   new_ap = false;
-      //   // TODO: add_wifi_cred();
-      // }
-    }
-  }
-}
-
-esp_err_t start_station(const char* ssid) {
-  // TODO: try all credentials
-  connected = 1;
-
-  wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-  CHECK_OK(esp_wifi_init(&cfg));
-
-  CHECK_OK(esp_event_handler_register(
-    WIFI_EVENT, ESP_EVENT_ANY_ID, &station_event_handler, NULL
-  ));
-  CHECK_OK(esp_event_handler_register(
-    IP_EVENT, IP_EVENT_STA_GOT_IP, &station_event_handler, NULL
-  ));
-
-  // TODO: try all credentials
-  wifi_config_t wifi_config = { .sta = { } };
-  /*
-  memcpy(wifi_config.sta.ssid    , wifi_ssid, MAX_SSID_LEN);
-  memcpy(wifi_config.sta.password, wifi_pass, MAX_PASS_LEN);
-  if (wifi_pass[0]) {
-    wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
-  }
-  */
-
-  CHECK_OK(esp_wifi_set_mode(WIFI_MODE_STA));
-  CHECK_OK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config));
-  CHECK_OK_1(esp_wifi_start());
 
   return ESP_OK;
 err:
@@ -362,9 +377,8 @@ static void init_server(void) {
 #undef ADD_PAGE
 
   // Start WiFi
-  // TODO: start_station(NULL)
-
-  start_access_point();
+  if (start_station(wifi_cred) != ESP_OK)
+    start_access_point();
 
 err: ;
 }
