@@ -4,20 +4,23 @@
 
 // WiFi connection behavior
 // ============================================================================
-// Cause     | N saved | Effect                        | Handler
+// Cause     | N saved | Effect                       | Option | Handler
 // ----------------------------------------------------------------------------
-// Boot up   | N =  0  | AP                            | init_server
-// Boot up   | N >= 1  | Try first saved, else AP      | start_station
-// Blank req | N =  0  | Error                         | POST_connect
-// Blank req | N >= 1  | Try each saved once, else AP  | start_station
-// Req SSID  | N =  0  | Error                         | POST_connect
-// Req SSID  | N >= 1  | Try STA once, else prev state | start_station
-// Req S & P | N =  0  | Try STA once, else prev state | start_station
-// Req S & P | N >= 1  | Try STA once, else prev state | start_station
+// Boot up   | N =  0  | AP                           | AP     | init_server
+// Boot up   | N >= 1  | Try first saved, else AP     | ONCE   | start_station
+// Blank req | N =  0  | Error                        | Error  | POST_connect
+// Blank req | N >= 1  | Try each saved once, else AP | ALL    | start_station
+// Req SSID  | N =  0  | Error                        | Error  | POST_connect
+// Req SSID  | N >= 1  | Try once, else prev state    | ONCE   | start_station
+// Req S & P |         | Try once, else prev state    | ONCE   | start_station
+// Disconnect|         | Try first saved a few times  | FIRST  | event handler
 // ----------------------------------------------------------------------------
 
-esp_err_t start_access_point(void);
-esp_err_t start_station(const char* cred);
+// TODO: Implement API to return saved SSIDs
+// TODO: Implement disconnect API
+
+static esp_err_t start_access_point(void);
+static esp_err_t start_station(const char* cred);
 
 static esp_err_t GET_(httpd_req_t* req) {
   httpd_resp_set_hdr(req,"Content-Encoding","gzip");
@@ -115,12 +118,18 @@ send:
 
 static esp_err_t POST_connect(httpd_req_t* req) {
   const char* response = "";
-  const char *ssid = NULL;
-  char buf[MAX_SSID_LEN+1+MAX_PASS_LEN+1] = { '\0' };
+  char buf[MAX_SSID_LEN+1+MAX_PASS_LEN+1];
+  const char* ssid = buf;
 
   size_t len = req->content_len;
-  if (len == 0) goto wifi_cred;
-
+  if (len == 0) { // no SSID in request
+    if (!wifi_cred) {
+      response = "No known SSIDs";
+      goto bad_request;
+    }
+    ssid = wifi_cred + 1;
+    goto connect;
+  }
   if (len > sizeof(buf)) {
     response = "SSID or PASS is too long";
     goto bad_request;
@@ -137,7 +146,6 @@ static esp_err_t POST_connect(httpd_req_t* req) {
   }
   len = req->content_len;
 
-  ssid = buf;
   const char* pass = memchr(ssid, '\0', MIN(len, MAX_SSID_LEN+1));
   if (!pass) {
     response = "SSID not terminated or longer than " STR(MAX_SSID_LEN) " bytes";
@@ -146,8 +154,12 @@ static esp_err_t POST_connect(httpd_req_t* req) {
   ++pass; // move past null byte
 
   len -= pass - ssid;
-  if (len == 0) {
-    goto wifi_cred;
+  if (len == 0) { // no PASS in request
+    ssid = find_wifi_cred(ssid);
+    if (!ssid) {
+      response = "Not a known SSID";
+      goto bad_request;
+    }
   }
   if (!memchr(pass, '\0', MIN(len, MAX_PASS_LEN+1))) {
     response = "PASS not terminated or longer than " STR(MAX_PASS_LEN) " bytes";
@@ -158,34 +170,24 @@ connect:
   {
 #define PREFIX "Connecting to "
     char response[sizeof(PREFIX) + MAX_SSID_LEN] = PREFIX;
-    const char* name = ssid ? ssid : wifi_cred;
-    char* end = mempcpy(response + sizeof(PREFIX) - 1, name, strlen(name));
+    char* end = mempcpy(response + sizeof(PREFIX) - 1, ssid, strlen(ssid));
 #undef PREFIX
     httpd_resp_send(req, response, end - response);
   }
 
-  return ESP_OK; // TODO: remove when ready
+  { // save current WiFi mode
+    wifi_mode_t mode = WIFI_MODE_AP;
+    esp_wifi_get_mode(&mode);
+    wifi_flags.prev_mode_ap = (mode != WIFI_MODE_STA);
+  }
 
   esp_wifi_deauth_sta(0);
-  CHECK_OK(esp_wifi_stop());
+  esp_wifi_stop();
 
-  return start_station(ssid);
+  if (start_station(ssid) != ESP_OK)
+    start_access_point();
 
-wifi_cred:
-  if (!ssid) {
-    // use saved credentials if no ssid requested
-    if (!wifi_cred) {
-      response = "No known SSIDs";
-      goto bad_request;
-    }
-  } else {
-    ssid = find_wifi_cred(ssid);
-    if (!ssid) {
-      response = "Not a known SSID";
-      goto bad_request;
-    }
-  }
-  goto connect;
+  return ESP_OK;
 
 bad_request:
   httpd_resp_set_status(req, HTTPD_400);
@@ -194,7 +196,7 @@ bad_request:
 server_error:
   httpd_resp_send_500(req);
 
-err:
+// err:
   return ESP_FAIL;
 }
 
@@ -210,17 +212,21 @@ static void station_reconnect_timer_callback(void* arg) {
   esp_wifi_connect();
 }
 
+// TODO: find info on esp_wifi_set_config + NVS
+
 static void station_event_handler(
-  void* arg, /* try_all_saved, 0 or 1 */ // TODO
+  void* arg,
   esp_event_base_t event_base,
   int32_t event_id,
   void* event_data
 ) {
-  // TODO: handle cycling through saved creds
   static uint8_t attempt = 0;
   static uint8_t delayed_attempt = 0;
   if (event_base == WIFI_EVENT) {
     if (event_id == WIFI_EVENT_STA_START) {
+      attempt = 0;
+      delayed_attempt = 0;
+      wifi_flags.connected = false;
       esp_wifi_connect();
     } else if (event_id == WIFI_EVENT_STA_DISCONNECTED) {
       if (attempt < MAX_STATION_ATTEMPTS) {
@@ -232,7 +238,9 @@ static void station_event_handler(
       } else { // try to connect after a delay
         attempt = 0;
         puts("AP connection failed");
-        if (delayed_attempt < MAX_STATION_DELAYED_ATTEMPTS) {
+        if (wifi_flags.connected &&
+            delayed_attempt < MAX_STATION_DELAYED_ATTEMPTS
+        ) {
           ++delayed_attempt;
           puts("Attempting to reconnect in 1 minute");
           if (!station_reconnect_timer) {
@@ -250,16 +258,13 @@ static void station_event_handler(
           if (station_reconnect_timer)
             xTimerDelete(station_reconnect_timer, 0);
 
-          ESP_ERROR_CHECK(esp_event_handler_unregister(
-            IP_EVENT, IP_EVENT_STA_GOT_IP, &station_event_handler
-          ));
-          ESP_ERROR_CHECK(esp_event_handler_unregister(
-            WIFI_EVENT, ESP_EVENT_ANY_ID, &station_event_handler
-          ));
-
-          // Switch back to AP mode if connection failed
-          ESP_ERROR_CHECK(esp_wifi_stop());
-          start_access_point();
+          // Switch back to the previous mode if connection failed
+          esp_wifi_stop();
+          if (wifi_flags.prev_mode_ap ||
+              !wifi_cred ||
+              (wifi_flags.prev_mode_ap = true,
+               start_station(wifi_cred + 1) != ESP_OK)
+          ) start_access_point();
         }
       }
     }
@@ -267,42 +272,30 @@ static void station_event_handler(
     if (event_id == IP_EVENT_STA_GOT_IP) {
       attempt = 0;
       delayed_attempt = 0;
+      wifi_flags.connected = true;
 
       ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
       puts("Station IP address:");
       puts(ip4addr_ntoa(&event->ip_info.ip));
 
-      add_wifi_cred(arg);
+      add_wifi_cred();
     }
   }
 }
 
-esp_err_t start_station(const char* ssid) {
-  uint8_t try_all_saved = 0;
-  if (!ssid) {
-    if (!(ssid = wifi_cred)) return ESP_FAIL;
-    try_all_saved = 1;
-  }
-
+static esp_err_t start_station(const char* ssid) {
   // the function is always called with ssid\0pass\0
   const uint8_t ssid_len = strlen(ssid);
   const char* pass = ssid + ssid_len + 1;
   const uint8_t pass_len = strlen(pass);
 
-  wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-  CHECK_OK(esp_wifi_init(&cfg));
-
-  CHECK_OK(esp_event_handler_register(
-    WIFI_EVENT, ESP_EVENT_ANY_ID, &station_event_handler, (void*) try_all_saved
-  ));
-  CHECK_OK(esp_event_handler_register(
-    IP_EVENT, IP_EVENT_STA_GOT_IP, &station_event_handler, (void*) try_all_saved
-  ));
-
+  // TODO: can this be done without an intermediate struct?
+  // This can (maybe) in principle be done on the event handler,
+  // but then credentials would need to be dynamically allocated
   wifi_config_t wifi_config = { .sta = { } };
-  memcpy(wifi_config.sta.ssid, ssid, ssid_len);
+  memcpy(wifi_config.sta.ssid, ssid, ssid_len + (ssid_len < MAX_SSID_LEN));
   if (pass_len) {
-    memcpy(wifi_config.sta.password, pass, strlen(pass));
+    memcpy(wifi_config.sta.password, pass, pass_len + (pass_len < MAX_PASS_LEN));
     wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
   }
 
@@ -316,10 +309,10 @@ err:
   return ESP_FAIL;
 }
 
-esp_err_t start_access_point(void) {
-  wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-  CHECK_OK(esp_wifi_init(&cfg));
+static esp_err_t start_access_point(void) {
+  wifi_flags.connected = false;
 
+  // TODO: can this be set once on boot, or is AP config overwritten by STA?
   wifi_config_t wifi_config = {
     .ap = {
       .ssid = AP_SSID,
@@ -330,6 +323,7 @@ esp_err_t start_access_point(void) {
     }
   };
 
+  // TODO: can this be done without an intermediate struct?
   CHECK_OK(esp_wifi_set_mode(WIFI_MODE_AP));
   CHECK_OK(esp_wifi_set_config(ESP_IF_WIFI_AP, &wifi_config));
   CHECK_OK_1(esp_wifi_start());
@@ -376,8 +370,22 @@ static void init_server(void) {
 
 #undef ADD_PAGE
 
-  // Start WiFi
-  if (start_station(wifi_cred) != ESP_OK)
+  // Init WiFi
+  wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+  CHECK_OK(esp_wifi_init(&cfg));
+
+  CHECK_OK(esp_event_handler_register(
+    WIFI_EVENT, WIFI_EVENT_STA_START, &station_event_handler, NULL
+  ));
+  CHECK_OK(esp_event_handler_register(
+    IP_EVENT, IP_EVENT_STA_GOT_IP, &station_event_handler, NULL
+  ));
+  CHECK_OK(esp_event_handler_register(
+    IP_EVENT, WIFI_EVENT_STA_DISCONNECTED, &station_event_handler, NULL
+  ));
+
+  // Start Access Point or Station
+  if (!wifi_cred || start_station(wifi_cred) != ESP_OK)
     start_access_point();
 
 err: ;

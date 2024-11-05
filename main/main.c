@@ -73,6 +73,31 @@ extern const uint8_t index_page_end[] asm("_binary_index_html_gz_end");
 #define MIN(a, b) ((a) < (b) ? a : b)
 #define MAX(a, b) ((a) > (b) ? a : b)
 
+// Globals ==========================================================
+// ESP8266_RTOS_SDK/components/esp8266/include/esp_wifi_types.h
+// store last 8 successfully used access point credentials
+// #define MAX_SSID_LEN 32
+// #define MAX_PASS_LEN 64
+#define MAX_PASS_LEN MAX_PASSPHRASE_LEN
+
+// 1 byte  : N, number of saved credentials
+// N times : ssid\0pass\0
+static char* wifi_cred = NULL;
+// static size_t wifi_cred_len = 0;
+
+// handle to the NVS namespace
+static nvs_handle_t nvs_storage;
+
+static struct {
+  bool prev_mode_ap : 1;
+  bool connected : 1;
+} wifi_flags = {
+  .prev_mode_ap = true,
+  .connected = false
+};
+
+// ==================================================================
+
 #include "part_gpio.h"
 #include "part_nvs.h"
 #include "part_server.h"

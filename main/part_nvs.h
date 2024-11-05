@@ -1,28 +1,13 @@
-// ESP8266_RTOS_SDK/components/esp8266/include/esp_wifi_types.h
-// store last 8 successfully used access point credentials
-// #define MAX_SSID_LEN 32
-// #define MAX_PASS_LEN 64
-#define MAX_PASS_LEN MAX_PASSPHRASE_LEN
-
-// 1 : number of saved credentials
-// n : 1 : ssid length
-//     n : ssid
-//     1 : password length
-//     n : password
-static char* wifi_cred = NULL;
-static size_t wifi_cred_len = 0;
-
-// https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/storage/nvs_flash.html
-static nvs_handle_t nvs_storage;
-
-static void get_wifi_cred(void) {
+static void read_wifi_cred(void) {
+  size_t wifi_cred_len = 0;
   CHECK_OK(nvs_get_blob(nvs_storage, "wifi_cred", NULL, &wifi_cred_len)); // get length
   if (wifi_cred_len == 0) goto err;
   if (wifi_cred) free(wifi_cred);
   wifi_cred = malloc(wifi_cred_len);
   CHECK_OK(nvs_get_blob(nvs_storage, "wifi_cred", &wifi_cred, &wifi_cred_len)); // get data
-  if (wifi_cred[wifi_cred_len-1] != '\0') {
-    // corrupted wifi_cred
+  if (*(uint8_t*)wifi_cred == 0 || // empty
+      wifi_cred[wifi_cred_len-1] != '\0' // not null terminated
+  ) {
     nvs_erase_key(nvs_storage, "wifi_cred");
     goto err;
   }
@@ -32,7 +17,6 @@ err:
   // no valid credentials are available
   if (wifi_cred) free(wifi_cred);
   wifi_cred = NULL;
-  wifi_cred_len = 0;
 }
 
 static const char* find_wifi_cred(const char* ssid) {
@@ -47,10 +31,22 @@ static const char* find_wifi_cred(const char* ssid) {
   return NULL;
 }
 
-static void add_wifi_cred(const char* cred) {
-  uint8_t cred_len = strlen(cred);
-  const char* pass = cred + cred_len + 1;
-  cred_len += strlen(pass) + 1;
+// TODO: test this function
+static void add_wifi_cred() {
+  wifi_config_t wifi_config = { };
+  CHECK_OK(esp_wifi_get_config(ESP_IF_WIFI_STA, &wifi_config));
+
+  const char* ssid = (const char*) wifi_config.sta.ssid;
+  const char* pass = (const char*) wifi_config.sta.password;
+
+  const char* end = memchr(ssid, '\0', MAX_SSID_LEN);
+  const uint8_t ssid_len = end ? end - ssid : MAX_SSID_LEN;
+  end = memchr(pass, '\0', MAX_PASS_LEN);
+  const uint8_t pass_len = end ? end - pass : MAX_PASS_LEN;
+
+  // uint8_t ssid_len = strlen(cred);
+  // const char* pass = cred + cred_len + 1;
+  // cred_len += strlen(pass) + 1;
 
   const char* a = wifi_cred;
   uint8_t ncreds = a ? *(uint8_t*)(a++) : 0;
@@ -61,8 +57,8 @@ static void add_wifi_cred(const char* cred) {
     const uint8_t ssid_len = strlen(e);
     e += ssid_len + 1;
     const uint8_t pass_len = strlen(e);
-    if (c == a && !strcmp(d, cred)) {
-      if (d == a && !strcmp(e, pass))
+    if (c == a && !strncmp(d, ssid, MAX_SSID_LEN)) {
+      if (d == a && !strncmp(e, pass, MAX_PASS_LEN))
         return; // same ssid and pass in first credential
       b = d;
       e += pass_len + 1;
@@ -79,21 +75,31 @@ static void add_wifi_cred(const char* cred) {
   // if ssid is already on file, ncreds stays the same
   // and records only need to be moved, not removed
 
-  wifi_cred_len = 1; // ncreds
-  wifi_cred_len += cred_len;
-  wifi_cred_len += b - a;
-  wifi_cred_len += e - c;
+  size_t len = 1; // ncreds
+  // len += cred_len;
+  len += ssid_len;
+  len += 1;
+  len += pass_len;
+  len += 1;
+  len += b - a;
+  len += e - c;
 
-  char* p = malloc(wifi_cred_len);
+  char* p = malloc(len);
   *(uint8_t*)(p++) = ncreds;
-  p = mempcpy(p, cred, cred_len);
+  // p = mempcpy(p, cred, cred_len);
+  p = mempcpy(p, ssid, ssid_len);
+  *p++ = '\0';
+  p = mempcpy(p, pass, pass_len);
+  *p++ = '\0';
   p = mempcpy(p, a, b - a);
   p = mempcpy(p, c, e - c);
 
   if (wifi_cred) free(wifi_cred);
-  wifi_cred = p - wifi_cred_len;
+  wifi_cred = p - len;
 
-  nvs_set_blob(nvs_storage, "wifi_cred", wifi_cred, wifi_cred_len);
+  nvs_set_blob(nvs_storage, "wifi_cred", wifi_cred, len);
+
+err: ;
 }
 
 static void init_nvs(void) {
@@ -110,7 +116,7 @@ static void init_nvs(void) {
 
   CHECK_OK_1(nvs_open("storage", NVS_READWRITE, &nvs_storage));
 
-  get_wifi_cred();
+  read_wifi_cred();
 
 err: ;
 }
