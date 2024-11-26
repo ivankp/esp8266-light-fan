@@ -51,12 +51,23 @@ extern const uint8_t index_page_end[] asm("_binary_index_html_gz_end");
 
 // #define FIELD_SIZE(t,f) (sizeof(((t*)0)->f))
 
+#define TEST(str, ...) \
+  printf(STR(__LINE__) ": " str "\n", ##__VA_ARGS__);
+
 #define VERBOSITY 1
 
+/* TODO: revert after debugging
 #define CHECK_OK_VERBOSE(x) \
   if ((x) != ESP_OK) { puts(STR(__LINE__) ": " #x " != ESP_OK"); goto err; }
 #define CHECK_OK(x) \
   if ((x) != ESP_OK) { goto err; }
+*/
+#define CHECK_OK_VERBOSE(x) { \
+  const int ret = (x); \
+  printf(STR(__LINE__) ": " #x " == %d\n", ret); \
+  if (ret != ESP_OK) { goto err; } \
+}
+#define CHECK_OK CHECK_OK_VERBOSE
 
 #if VERBOSITY >= 1
 #  define CHECK_OK_1 CHECK_OK_VERBOSE
@@ -91,9 +102,11 @@ static nvs_handle_t nvs_storage;
 static struct {
   bool prev_mode_ap : 1;
   bool connected : 1;
-} wifi_flags = {
+  bool manual_disconnect : 1;
+} global_flags = {
   .prev_mode_ap = true,
-  .connected = false
+  .connected = false,
+  .manual_disconnect = false,
 };
 
 // ==================================================================

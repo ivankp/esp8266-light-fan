@@ -22,13 +22,36 @@
 static esp_err_t start_access_point(void);
 static esp_err_t start_station(const char* cred);
 
+static esp_err_t send_server_busy(httpd_req_t* req) {
+  httpd_resp_set_status (req, "503 Service Unavailable");
+  // httpd_resp_set_type   (req, HTTPD_TYPE_TEXT);
+  return httpd_resp_send(req, NULL, 0);
+}
+
+static bool server_busy = false;
+
+#define SERVER_BUSY \
+  if (server_busy) return send_server_busy(req);
+
+static esp_err_t POST_nvs_list(httpd_req_t* req) {
+  SERVER_BUSY
+
+  list_nvs();
+  httpd_resp_send(req, NULL, 0);
+  return ESP_OK;
+}
+
 static esp_err_t GET_(httpd_req_t* req) {
+  SERVER_BUSY
+
   httpd_resp_set_hdr(req,"Content-Encoding","gzip");
   httpd_resp_send(req, (const char*) index_page, index_page_end - index_page);
   return ESP_OK;
 }
 
 static esp_err_t GET_get(httpd_req_t* req) {
+  SERVER_BUSY
+
   char buf[] = "{\"light\":0,\"fan\":0}";
   char* p = strchr(buf, '0');
   *p += gpio_get_level(LIGHT_PIN);
@@ -40,6 +63,8 @@ static esp_err_t GET_get(httpd_req_t* req) {
 }
 
 static esp_err_t GET_set(httpd_req_t* req) {
+  SERVER_BUSY
+
   char buf[64] = "{";
   char* buf_ptr = buf + 1;
   const char* a = strchr(req->uri,'?');
@@ -113,10 +138,32 @@ send:
   return ESP_OK;
 }
 
+/*
+static TimerHandle_t station_connect_timer = NULL;
+
+static void station_connect_timer_callback(void* arg) {
+  xTimerDelete(station_connect_timer, 0);
+  station_connect_timer = NULL;
+
+  esp_wifi_deauth_sta(0);
+  esp_wifi_stop();
+
+  server_busy = false;
+
+  // TODO: why is this called twice sometimes?
+  TEST("start_station()")
+  if (start_station(ssid) != ESP_OK)
+    start_access_point();
+}
+*/
+
 // WiFi standard allows arbitrary SSID and PASS bytes
 // But esp firmware library relies on them being null terminated
 
 static esp_err_t POST_connect(httpd_req_t* req) {
+  SERVER_BUSY
+  server_busy = true;
+
   const char* response = "";
   char buf[MAX_SSID_LEN+1+MAX_PASS_LEN+1];
   const char* ssid = buf;
@@ -174,26 +221,51 @@ connect:
 #undef PREFIX
     httpd_resp_send(req, response, end - response);
   }
+  // TODO: httpd_resp_send() returns too fast
+  // client appears to not receive before esp_wifi_stop()
 
   { // save current WiFi mode
     wifi_mode_t mode = WIFI_MODE_AP;
     esp_wifi_get_mode(&mode);
-    wifi_flags.prev_mode_ap = (mode != WIFI_MODE_STA);
+    global_flags.prev_mode_ap = (mode != WIFI_MODE_STA);
   }
+
+  global_flags.manual_disconnect = !global_flags.prev_mode_ap;
+
+  // if (!station_connect_timer) {
+  //   station_connect_timer = xTimerCreate/*Static*/(
+  //     "",
+  //     2000 / portTICK_PERIOD_MS, // period in ticks
+  //     pdFALSE, // not periodic
+  //     (void*) 0, // timer id
+  //     station_connect_timer_callback
+  //   );
+  // }
+  // xTimerStart(station_connect_timer, 0);
+
+  sleep(2); // delay to allow current requests to finish
 
   esp_wifi_deauth_sta(0);
   esp_wifi_stop();
 
+  server_busy = false;
+
+  // TODO: why is this called twice sometimes?
+  TEST("start_station()")
   if (start_station(ssid) != ESP_OK)
     start_access_point();
 
   return ESP_OK;
 
 bad_request:
+  server_busy = false;
+
   httpd_resp_set_status(req, HTTPD_400);
   return httpd_resp_send(req, response, strlen(response));
 
 server_error:
+  server_busy = false;
+
   httpd_resp_send_500(req);
 
 // err:
@@ -209,7 +281,8 @@ server_error:
 static TimerHandle_t station_reconnect_timer = NULL;
 
 static void station_reconnect_timer_callback(void* arg) {
-  esp_wifi_connect();
+  CHECK_OK_2(esp_wifi_connect());
+err: ;
 }
 
 // TODO: find info on esp_wifi_set_config + NVS
@@ -220,25 +293,32 @@ static void station_event_handler(
   int32_t event_id,
   void* event_data
 ) {
+  TEST("%s %" PRId32 "\n", event_base, event_id);
   static uint8_t attempt = 0;
   static uint8_t delayed_attempt = 0;
   if (event_base == WIFI_EVENT) {
     if (event_id == WIFI_EVENT_STA_START) {
       attempt = 0;
       delayed_attempt = 0;
-      wifi_flags.connected = false;
-      esp_wifi_connect();
+      global_flags.connected = false;
+      CHECK_OK_2(esp_wifi_connect());
+      // TODO: nothing happens after esp_wifi_connect() call
+      // with non-existent SSID
     } else if (event_id == WIFI_EVENT_STA_DISCONNECTED) {
+      if (global_flags.manual_disconnect) {
+        global_flags.manual_disconnect = false;
+        return;
+      }
       if (attempt < MAX_STATION_ATTEMPTS) {
         ++attempt;
         puts("Retrying AP connection");
-        esp_wifi_connect();
+        CHECK_OK_2(esp_wifi_connect());
         // WIFI_EVENT_STA_DISCONNECTED is triggered by esp_wifi_connect()
         // if it fails
       } else { // try to connect after a delay
         attempt = 0;
         puts("AP connection failed");
-        if (wifi_flags.connected &&
+        if (global_flags.connected &&
             delayed_attempt < MAX_STATION_DELAYED_ATTEMPTS
         ) {
           ++delayed_attempt;
@@ -260,9 +340,10 @@ static void station_event_handler(
 
           // Switch back to the previous mode if connection failed
           esp_wifi_stop();
-          if (wifi_flags.prev_mode_ap ||
+          TEST("start_station()")
+          if (global_flags.prev_mode_ap ||
               !wifi_cred ||
-              (wifi_flags.prev_mode_ap = true,
+              (global_flags.prev_mode_ap = true,
                start_station(wifi_cred + 1) != ESP_OK)
           ) start_access_point();
         }
@@ -272,7 +353,7 @@ static void station_event_handler(
     if (event_id == IP_EVENT_STA_GOT_IP) {
       attempt = 0;
       delayed_attempt = 0;
-      wifi_flags.connected = true;
+      global_flags.connected = true;
 
       ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
       puts("Station IP address:");
@@ -281,6 +362,7 @@ static void station_event_handler(
       add_wifi_cred();
     }
   }
+err: ;
 }
 
 static esp_err_t start_station(const char* ssid) {
@@ -310,7 +392,7 @@ err:
 }
 
 static esp_err_t start_access_point(void) {
-  wifi_flags.connected = false;
+  global_flags.connected = false;
 
   // TODO: can this be set once on boot, or is AP config overwritten by STA?
   wifi_config_t wifi_config = {
@@ -368,11 +450,13 @@ static void init_server(void) {
 
   ADD_PAGE(POST, connect)
 
+  ADD_PAGE(POST, nvs_list)
+
 #undef ADD_PAGE
 
   // Init WiFi
   wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-  CHECK_OK(esp_wifi_init(&cfg));
+  CHECK_OK_1(esp_wifi_init(&cfg));
 
   CHECK_OK(esp_event_handler_register(
     WIFI_EVENT, WIFI_EVENT_STA_START, &station_event_handler, NULL
@@ -385,7 +469,8 @@ static void init_server(void) {
   ));
 
   // Start Access Point or Station
-  if (!wifi_cred || start_station(wifi_cred) != ESP_OK)
+  TEST("start_station()")
+  if (!wifi_cred || start_station(wifi_cred+1) != ESP_OK)
     start_access_point();
 
 err: ;

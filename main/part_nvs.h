@@ -1,10 +1,21 @@
+static void list_nvs(void) {
+  nvs_iterator_t it = nvs_entry_find("nvs", "storage", NVS_TYPE_ANY);
+  while (it != NULL) {
+    nvs_entry_info_t info;
+    nvs_entry_info(it, &info);
+    printf("%d '%s'\n", info.type, info.key);
+    it = nvs_entry_next(it);
+  }
+  nvs_release_iterator(it);
+}
+
 static void read_wifi_cred(void) {
   size_t wifi_cred_len = 0;
   CHECK_OK(nvs_get_blob(nvs_storage, "wifi_cred", NULL, &wifi_cred_len)); // get length
   if (wifi_cred_len == 0) goto err;
   if (wifi_cred) free(wifi_cred);
   wifi_cred = malloc(wifi_cred_len);
-  CHECK_OK(nvs_get_blob(nvs_storage, "wifi_cred", &wifi_cred, &wifi_cred_len)); // get data
+  CHECK_OK(nvs_get_blob(nvs_storage, "wifi_cred", wifi_cred, &wifi_cred_len)); // get data
   if (*(uint8_t*)wifi_cred == 0 || // empty
       wifi_cred[wifi_cred_len-1] != '\0' // not null terminated
   ) {
@@ -39,16 +50,16 @@ static void add_wifi_cred() {
   const char* ssid = (const char*) wifi_config.sta.ssid;
   const char* pass = (const char*) wifi_config.sta.password;
 
-  const char* end = memchr(ssid, '\0', MAX_SSID_LEN);
-  const uint8_t ssid_len = end ? end - ssid : MAX_SSID_LEN;
-  end = memchr(pass, '\0', MAX_PASS_LEN);
-  const uint8_t pass_len = end ? end - pass : MAX_PASS_LEN;
+  const char* a = memchr(ssid, '\0', MAX_SSID_LEN);
+  const uint8_t ssid_len = a ? a - ssid : MAX_SSID_LEN;
+  a = memchr(pass, '\0', MAX_PASS_LEN);
+  const uint8_t pass_len = a ? a - pass : MAX_PASS_LEN;
 
   // uint8_t ssid_len = strlen(cred);
   // const char* pass = cred + cred_len + 1;
   // cred_len += strlen(pass) + 1;
 
-  const char* a = wifi_cred;
+  a = wifi_cred;
   uint8_t ncreds = a ? *(uint8_t*)(a++) : 0;
 
   const char *b = a, *c = a, *d = a, *e = a;
@@ -58,8 +69,10 @@ static void add_wifi_cred() {
     e += ssid_len + 1;
     const uint8_t pass_len = strlen(e);
     if (c == a && !strncmp(d, ssid, MAX_SSID_LEN)) {
-      if (d == a && !strncmp(e, pass, MAX_PASS_LEN))
+      if (d == a && !strncmp(e, pass, MAX_PASS_LEN)) {
+        puts("first cred, return");
         return; // same ssid and pass in first credential
+      }
       b = d;
       e += pass_len + 1;
       c = e;
@@ -104,14 +117,16 @@ err: ;
 
 static void init_nvs(void) {
   // https://github.com/espressif/esp-idf/blob/cf7e743a9b2e5fd2520be4ad047c8584188d54da/examples/storage/nvs_rw_value/main/nvs_value_example_main.c
+  // default partition name is "nvs"
 
-  esp_err_t err = nvs_flash_init();
-  if (
-    err == ESP_ERR_NVS_NO_FREE_PAGES ||
-    err == ESP_ERR_NVS_NEW_VERSION_FOUND
-  ) { // NVS partition was truncated and needs to be erased
-    CHECK_OK_1(nvs_flash_erase());
-    CHECK_OK_1(nvs_flash_init());
+  switch (nvs_flash_init()) {
+    case ESP_OK: break;
+    case ESP_ERR_NVS_NO_FREE_PAGES:
+    case ESP_ERR_NVS_NEW_VERSION_FOUND:
+      CHECK_OK_1(nvs_flash_erase());
+      CHECK_OK_1(nvs_flash_init());
+    default:
+      goto err;
   }
 
   CHECK_OK_1(nvs_open("storage", NVS_READWRITE, &nvs_storage));
