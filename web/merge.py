@@ -24,7 +24,7 @@ def read(filename):
 def read_terse(filename):
     return re_ns.sub('', read(filename))
 
-html = re.sub(r'>', '>\n', read_terse('index.html'), 1)
+html = re.sub(r'>', '>\n', read_terse('index.html'), count=1)
 
 merged = ''
 cursor = 0
