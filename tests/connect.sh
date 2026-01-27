@@ -2,7 +2,7 @@
 
 SSID='light-and-fan'
 
-nmcli device wifi connect "$SSID" password 'automation'
+nmcli device wifi connect "$SSID"
 
 nmcli dev status \
 | awk ''' {

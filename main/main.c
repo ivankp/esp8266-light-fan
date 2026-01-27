@@ -7,7 +7,6 @@
 #include "freertos/timers.h"
 #include "freertos/event_groups.h"
 
-// #include "esp8266/gpio_struct.h"
 #include "driver/gpio.h"
 
 #include "esp_system.h"
@@ -31,18 +30,14 @@
 #define LIGHT_SWITCH_PIN 13
 #define FAN_SWITCH_PIN 14
 
-// default Access Point IP address: 192.168.4.1
+// Default Access Point IP address: 192.168.4.1
 #define AP_SSID "light-and-fan"
 #define AP_PASS "automation"
 #define MAX_CONN 4
 
-#define MAX_CRED 8
+// #define MAX_CRED 8
 #define MAX_STATION_ATTEMPTS 2
 #define MAX_STATION_DELAYED_ATTEMPTS 8
-
-// embedded static files
-extern const uint8_t index_page[] asm("_binary_index_html_gz_start");
-extern const uint8_t index_page_end[] asm("_binary_index_html_gz_end");
 
 // Helpers ==========================================================
 
@@ -51,72 +46,44 @@ extern const uint8_t index_page_end[] asm("_binary_index_html_gz_end");
 
 // #define FIELD_SIZE(t,f) (sizeof(((t*)0)->f))
 
-#define TEST(str, ...) \
-  printf(STR(__LINE__) ": " str "\n", ##__VA_ARGS__);
+// #define TEST(str, ...)
+//   printf(STR(__LINE__) ": " str "\n", ##__VA_ARGS__);
 
-#define VERBOSITY 1
+#define CHECK_OK_DEBUG
 
-/* TODO: revert after debugging
-#define CHECK_OK_VERBOSE(x) \
-  if ((x) != ESP_OK) { puts(STR(__LINE__) ": " #x " != ESP_OK"); goto err; }
+#ifndef CHECK_OK_DEBUG
 #define CHECK_OK(x) \
   if ((x) != ESP_OK) { goto err; }
-*/
+#else
+#define CHECK_OK(x) \
+  if ((x) != ESP_OK) { puts(STR(__LINE__) ": " #x " != ESP_OK"); goto err; }
+#endif
+
 #define CHECK_OK_VERBOSE(x) { \
   const int ret = (x); \
   printf(STR(__LINE__) ": " #x " == %d\n", ret); \
   if (ret != ESP_OK) { goto err; } \
 }
-#define CHECK_OK CHECK_OK_VERBOSE
 
-#if VERBOSITY >= 1
-#  define CHECK_OK_1 CHECK_OK_VERBOSE
-#else
-#  define CHECK_OK_1 CHECK_OK
-#endif
-
-#if VERBOSITY >= 2
-#  define CHECK_OK_2 CHECK_OK_VERBOSE
-#else
-#  define CHECK_OK_2 CHECK_OK
-#endif
-
-#define MIN(a, b) ((a) < (b) ? a : b)
-#define MAX(a, b) ((a) > (b) ? a : b)
+// #define MIN(a, b) ((a) < (b) ? a : b)
+// #define MAX(a, b) ((a) > (b) ? a : b)
 
 // Globals ==========================================================
 // ESP8266_RTOS_SDK/components/esp8266/include/esp_wifi_types.h
 // store last 8 successfully used access point credentials
 // #define MAX_SSID_LEN 32
 // #define MAX_PASS_LEN 64
-#define MAX_PASS_LEN MAX_PASSPHRASE_LEN
-
-// 1 byte  : N, number of saved credentials
-// N times : ssid\0pass\0
-static char* wifi_cred = NULL;
-// static size_t wifi_cred_len = 0;
-
-// handle to the NVS namespace
-static nvs_handle_t nvs_storage;
-
-static struct {
-  bool prev_mode_ap : 1;
-  bool connected : 1;
-  bool manual_disconnect : 1;
-} global_flags = {
-  .prev_mode_ap = true,
-  .connected = false,
-  .manual_disconnect = false,
-};
+// #define MAX_PASS_LEN MAX_PASSPHRASE_LEN
 
 // ==================================================================
 
 #include "part_gpio.h"
-#include "part_nvs.h"
+/* #include "part_nvs.h" */
 #include "part_server.h"
+#include "part_wifi.h"
 
 void app_main(void) {
   init_gpio();
-  init_nvs();
+  /* init_nvs(); */
   init_server();
 }

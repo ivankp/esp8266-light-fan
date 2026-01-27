@@ -43,7 +43,7 @@ static void init_gpio(void) {
       .intr_type = GPIO_INTR_DISABLE /* no interrupt */
     };
 
-#define OUTPUT_PIN(PIN,VAL) \
+#define OUTPUT_PIN(PIN, VAL) \
     io_conf.pin_bit_mask = (1ull << PIN); /* GPIO pin */ \
     gpio_config(&io_conf); \
     gpio_set_level(PIN, VAL);
