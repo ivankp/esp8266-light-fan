@@ -23,9 +23,6 @@
 extern const uint8_t index_page[] asm("_binary_index_html_gz_start");
 extern const uint8_t index_page_end[] asm("_binary_index_html_gz_end");
 
-/* static esp_err_t start_access_point(void); */
-/* static esp_err_t start_station(const char* cred); */
-
 static esp_err_t GET_(httpd_req_t* req) {
   httpd_resp_set_hdr(req,"Content-Encoding","gzip");
   httpd_resp_send(req, (const char*) index_page, index_page_end - index_page);
@@ -34,12 +31,16 @@ static esp_err_t GET_(httpd_req_t* req) {
 
 static esp_err_t GET_get(httpd_req_t* req) {
   char buf[] = "{\"light\":0,\"fan\":0}";
-  char* p = strchr(buf, '0');
-  *p += gpio_get_level(LIGHT_PIN);
-  p = strchr(p+1, '0');
-  *p += gpio_get_level(FAN_PIN);
+  char* p = buf;
+  FOR_ARRAY(controls, i) {
+    Control* const ctrl = controls + i;
+    if (ctrl->switch_pin < 0)
+      continue;
+    p = strchr(p+1, '0');
+    *p += gpio_get_level(ctrl->output_pin);
+  }
   httpd_resp_set_type(req, HTTPD_TYPE_JSON);
-  httpd_resp_send(req, buf, strlen(buf)); // TODO: sizeof
+  httpd_resp_send(req, buf, sizeof(buf)-1);
   return ESP_OK;
 }
 
@@ -61,40 +62,23 @@ static esp_err_t GET_set(httpd_req_t* req) {
     } else if (c == '&' || c == '\0') {
       if (!key) goto next;
 
-#define KEYCMP(KEY) \
-      (key_len==(sizeof(KEY)-1) && !memcmp(key, KEY, key_len))
+      FOR_ARRAY(controls, i) {
+        Control* const ctrl = controls + i;
 
-#define KEYCPY \
-      if (buf_ptr - buf > 1) { *buf_ptr++ = ','; } \
-      *buf_ptr++ = '\"'; \
-      buf_ptr = mempcpy(buf_ptr, key, key_len); \
-      *buf_ptr++ = '\"'; \
-      *buf_ptr++ = ':';
+        if (strncmp(ctrl->name, key, key_len))
+          continue;
 
-      if (KEYCMP("light")) {
         const char val = *a;
         if (b - a != 1 || !(val == '0' || val == '1')) goto next;
-        gpio_set_level(LIGHT_PIN, val - '0');
-        KEYCPY
-        *buf_ptr++ = val;
-      } else
-      if (KEYCMP("fan")) {
-        const char val = *a;
-        if (b - a != 1 || !(val == '0' || val == '1')) goto next;
-        gpio_set_level(FAN_PIN, val - '0');
-        KEYCPY
-        *buf_ptr++ = val;
-      } else
-      if (KEYCMP("led")) {
-        const char val = *a;
-        if (b - a != 1 || !(val == '0' || val == '1')) goto next;
-        gpio_set_level(LED_PIN, !(val - '0')); // inverted
-        KEYCPY
+        gpio_set_level(ctrl->output_pin, (val - '0') != ctrl->inverted);
+
+        if (buf_ptr - buf > 1) { *buf_ptr++ = ','; }
+        *buf_ptr++ = '\"';
+        buf_ptr = mempcpy(buf_ptr, key, key_len);
+        *buf_ptr++ = '\"';
+        *buf_ptr++ = ':';
         *buf_ptr++ = val;
       }
-
-#undef KEYCMP
-#undef KEYCPY
 
 next:
       if (c == '\0') break;
@@ -138,6 +122,9 @@ static void station_connect_timer_callback(void* arg) {
 
 // WiFi standard allows arbitrary SSID and PASS bytes
 // But esp firmware library relies on them being null terminated
+
+/* static esp_err_t start_access_point(void); */
+/* static esp_err_t start_station(const char* cred); */
 
 // static esp_err_t POST_connect(httpd_req_t* req) {
 //   const char* response = "";

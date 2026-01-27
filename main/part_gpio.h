@@ -1,90 +1,86 @@
-// TODO: transpose
-static const int output_pin[] = { LIGHT_PIN, FAN_PIN };
-static volatile int switch_state[] = { 0, 0 };
-static volatile bool switch_enable[] = { true, true };
-static TimerHandle_t switch_timer[] = { NULL, NULL };
+typedef struct {
+  const char* const name;
+  const int output_pin;
+  const int switch_pin;
+  const bool inverted;
+  volatile bool switch_enable;
+  volatile int switch_state;
+  TimerHandle_t switch_timer;
+} Control;
+
+static Control controls[] = {
+  { "light",  5, 13, false, true , 0, NULL },
+  { "fan"  ,  4, 14, false, true , 0, NULL },
+  { "led"  ,  2, -1, true , false, 0, NULL },
+};
 
 static void switch_isr(void *arg) {
-  const int i = (int)arg;
-  if (switch_enable[i]) {
-    switch_enable[i] = false;
+  Control* const ctrl = controls + (int)arg;
+  if (ctrl->switch_enable) {
+    ctrl->switch_enable = false;
     // set output pin level
-    gpio_set_level(output_pin[i], (switch_state[i] = !switch_state[i]));
+    gpio_set_level(
+      ctrl->output_pin,
+      (ctrl->switch_state = !ctrl->switch_state)
+    );
   }
   // start timer
   BaseType_t xHigherPriorityTaskWoken = pdTRUE;
-  xTimerStartFromISR( switch_timer[i], &xHigherPriorityTaskWoken );
+  xTimerStartFromISR(ctrl->switch_timer, &xHigherPriorityTaskWoken);
 }
 
-// TODO: combine timer callbacks
-static void light_switch_timer_callback(void *arg) {
+static void switch_timer_callback(void *arg) {
+  Control* const ctrl = controls + (int)arg;
   // set output pin level
-  gpio_set_level(LIGHT_PIN,
-    (switch_state[0] = gpio_get_level(LIGHT_SWITCH_PIN)));
+  gpio_set_level(ctrl->output_pin,
+    (ctrl->switch_state = gpio_get_level(ctrl->switch_pin)));
   // enable switch
-  switch_enable[0] = true;
-  // TODO: notify clients
-}
-
-static void fan_switch_timer_callback(void *arg) {
-  // set output pin level
-  gpio_set_level(FAN_PIN,
-    (switch_state[1] = gpio_get_level(FAN_SWITCH_PIN)));
-  // enable switch
-  switch_enable[1] = true;
+  ctrl->switch_enable = true;
   // TODO: notify clients
 }
 
 static void init_gpio(void) {
-  { gpio_config_t io_conf = {
-      .mode = GPIO_MODE_OUTPUT,
-      .pull_up_en = GPIO_PULLUP_DISABLE,
-      .pull_down_en = GPIO_PULLDOWN_DISABLE,
-      .intr_type = GPIO_INTR_DISABLE /* no interrupt */
-    };
+  gpio_config_t io_conf = {
+    .mode = GPIO_MODE_OUTPUT,
+    .pull_up_en = GPIO_PULLUP_DISABLE,
+    .pull_down_en = GPIO_PULLDOWN_DISABLE,
+    .intr_type = GPIO_INTR_DISABLE /* no interrupt */
+  };
 
-#define OUTPUT_PIN(PIN, VAL) \
-    io_conf.pin_bit_mask = (1ull << PIN); /* GPIO pin */ \
-    gpio_config(&io_conf); \
-    gpio_set_level(PIN, VAL);
-
-    OUTPUT_PIN(  LED_PIN, 1/*inverted*/)
-    OUTPUT_PIN(LIGHT_PIN, 0)
-    OUTPUT_PIN(  FAN_PIN, 0)
-
-    io_conf.mode = GPIO_MODE_INPUT;
-    io_conf.intr_type = GPIO_INTR_DISABLE; /* interrupt edge */
-
-#define INPUT_PIN(PIN) \
-    io_conf.pin_bit_mask = (1ull << PIN); /* GPIO pin */ \
+  FOR_ARRAY(controls, i) {
+    Control* const ctrl = controls + i;
+    io_conf.pin_bit_mask = (1ull << ctrl->output_pin); // GPIO pin
     gpio_config(&io_conf);
-
-    INPUT_PIN(LIGHT_SWITCH_PIN)
-    INPUT_PIN(  FAN_SWITCH_PIN)
+    gpio_set_level(ctrl->output_pin, (int)ctrl->inverted);
   }
 
-  switch_timer[0] = xTimerCreate/*Static*/(
-    "",
-    50 / portTICK_PERIOD_MS, // period in ticks
-    pdFALSE, // not periodic
-    (void*) 0, // timer id
-    light_switch_timer_callback
-  );
-  switch_timer[1] = xTimerCreate/*Static*/(
-    "",
-    50 / portTICK_PERIOD_MS, // period in ticks
-    pdFALSE, // not periodic
-    (void*) 0, // timer id
-    fan_switch_timer_callback
-  );
+  io_conf.mode = GPIO_MODE_INPUT;
+  io_conf.intr_type = GPIO_INTR_DISABLE; /* interrupt edge */
 
-  // install gpio isr service
-  gpio_install_isr_service(0);
+  FOR_ARRAY(controls, i) {
+    const int switch_pin = controls[i].switch_pin;
+    if (switch_pin < 0)
+      continue;
 
-  // hook isr handlers for specific gpio pins
-  gpio_isr_handler_add(LIGHT_SWITCH_PIN, switch_isr, (void*)0);
-  gpio_isr_handler_add(  FAN_SWITCH_PIN, switch_isr, (void*)1);
+    io_conf.pin_bit_mask = (1ull << switch_pin); // GPIO pin
+    gpio_config(&io_conf);
+  }
 
-  gpio_set_intr_type(LIGHT_SWITCH_PIN, GPIO_INTR_ANYEDGE);
-  gpio_set_intr_type(  FAN_SWITCH_PIN, GPIO_INTR_ANYEDGE);
+  // Add ISR handlers and set interrupt types
+  // for gpio pins connected to switches
+  FOR_ARRAY(controls, i) {
+    const int switch_pin = controls[i].switch_pin;
+    if (switch_pin < 0)
+      continue;
+
+    controls[i].switch_timer = xTimerCreate/*Static*/(
+      "",
+      50 / portTICK_PERIOD_MS, // period in ticks
+      pdFALSE, // not periodic
+      (void*) i, // timer id
+      switch_timer_callback
+    );
+    gpio_isr_handler_add(switch_pin, switch_isr, (void*)i);
+    gpio_set_intr_type(switch_pin, GPIO_INTR_ANYEDGE);
+  }
 }

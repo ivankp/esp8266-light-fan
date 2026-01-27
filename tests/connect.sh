@@ -2,6 +2,8 @@
 
 SSID='light-and-fan'
 
+nmcli device wifi rescan ssid "$SSID"
+
 nmcli device wifi connect "$SSID"
 
 nmcli dev status \

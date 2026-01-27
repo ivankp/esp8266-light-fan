@@ -24,12 +24,6 @@
 
 // Config ===========================================================
 
-#define LED_PIN 2
-#define LIGHT_PIN 5
-#define FAN_PIN 4
-#define LIGHT_SWITCH_PIN 13
-#define FAN_SWITCH_PIN 14
-
 // Default Access Point IP address: 192.168.4.1
 #define AP_SSID "light-and-fan"
 #define AP_PASS "automation"
@@ -64,6 +58,10 @@
   printf(STR(__LINE__) ": " #x " == %d\n", ret); \
   if (ret != ESP_OK) { goto err; } \
 }
+
+#define ARRAY_SIZE(ARRAY) ( sizeof(ARRAY) / sizeof(*ARRAY) )
+#define FOR_ARRAY(ARRAY, INDEX) \
+  for (int INDEX = 0; INDEX < ARRAY_SIZE(ARRAY); ++INDEX)
 
 // #define MIN(a, b) ((a) < (b) ? a : b)
 // #define MAX(a, b) ((a) > (b) ? a : b)
