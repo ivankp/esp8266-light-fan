@@ -1,6 +1,8 @@
 // handle to the NVS namespace
 static nvs_handle_t nvs_storage;
 
+// =============================================================================
+
 static void init_nvs(void) {
   // https://github.com/espressif/esp-idf/blob/cf7e743a9b2e5fd2520be4ad047c8584188d54da/examples/storage/nvs_rw_value/main/nvs_value_example_main.c
   // default partition name is "nvs"

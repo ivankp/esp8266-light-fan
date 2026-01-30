@@ -14,6 +14,8 @@ static Control controls[] = {
   { "led"  ,  2, -1, true , false, 0, NULL },
 };
 
+// =============================================================================
+
 static void switch_isr(void *arg) {
   Control* const ctrl = controls + (int)arg;
   if (ctrl->switch_enable) {

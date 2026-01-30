@@ -4,6 +4,8 @@
 #define WIFI_CONNECTED_BIT BIT0
 #define WIFI_FAIL_BIT      BIT1
 
+// =============================================================================
+
 // static TimerHandle_t station_reconnect_timer = NULL;
 //
 // static void station_reconnect_timer_callback(void* arg) {
@@ -159,7 +161,7 @@ static void init_server(void) {
 
   CHECK_OK(httpd_start(&server, &config));
 
-#define ADD_PAGE(METHOD, PAGE) \
+#define X(METHOD, PAGE) \
   { httpd_uri_t handler = { \
       .uri       = "/" STR(PAGE), \
       .method    = HTTP_##METHOD, \
@@ -169,15 +171,9 @@ static void init_server(void) {
     httpd_register_uri_handler(server, &handler); \
   }
 
-  ADD_PAGE(GET, )
-  ADD_PAGE(GET, get)
-  ADD_PAGE(GET, set)
+  HTTP_PAGES
 
-  // ADD_PAGE(POST, connect)
-
-  // ADD_PAGE(POST, nvs_list)
-
-#undef ADD_PAGE
+#undef X
 
   // Init WiFi
   wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
@@ -194,7 +190,6 @@ static void init_server(void) {
   // ));
 
   // Start Access Point or Station
-  puts("start_access_point()");
   /* if (!wifi_cred || start_station(wifi_cred+1) != ESP_OK) */
     start_access_point();
 

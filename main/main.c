@@ -63,25 +63,18 @@
 #define FOR_ARRAY(ARRAY, INDEX) \
   for (int INDEX = 0; INDEX < ARRAY_SIZE(ARRAY); ++INDEX)
 
-// #define MIN(a, b) ((a) < (b) ? a : b)
-// #define MAX(a, b) ((a) > (b) ? a : b)
-
-// Globals ==========================================================
-// ESP8266_RTOS_SDK/components/esp8266/include/esp_wifi_types.h
-// store last 8 successfully used access point credentials
-// #define MAX_SSID_LEN 32
-// #define MAX_PASS_LEN 64
-// #define MAX_PASS_LEN MAX_PASSPHRASE_LEN
+#define MIN(a, b) ((a) < (b) ? a : b)
+#define MAX(a, b) ((a) > (b) ? a : b)
 
 // ==================================================================
 
 #include "part_gpio.h"
-/* #include "part_nvs.h" */
+// #include "part_nvs.h"
 #include "part_server.h"
 #include "part_wifi.h"
 
 void app_main(void) {
   init_gpio();
-  /* init_nvs(); */
+  // init_nvs();
   init_server();
 }

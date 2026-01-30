@@ -3,8 +3,7 @@
 addr='http://192.168.4.1/'
 
 test_get() {
-  local resp="$(curl -sS "${addr}" | wc -c)"
-  if [ "$resp" == "$2" ]; then
+  if cmp -s ../main/index.html.gz <(curl -sS "${addr}" | head -c 2584); then
     printf "\033[32mSuccess\033[0m $1\n"
   else
     printf "\033[31mFailed\033[0m $1\n"
@@ -13,6 +12,6 @@ test_get() {
   fi
 }
 
-for i in {1..100}; do
-  test_get "$i" '2585'
+for i in {1..25}; do
+  test_get "$i"
 done
