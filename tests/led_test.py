@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 
-import pytest
 import requests
 from time import sleep
 
@@ -11,16 +10,10 @@ def set_led(led):
     print(r.text)
     assert r.text == f'{{"led":{led}}}'
 
-@pytest.mark.slow
-def test_led():
+if __name__ == "__main__":
     set_led(0)
-    for _ in range(4):
+    for _ in range(10):
         sleep(1)
         set_led(1)
         sleep(1)
-        set_led(0)
-    for _ in range(4):
-        sleep(0.2)
-        set_led(1)
-        sleep(0.2)
         set_led(0)
