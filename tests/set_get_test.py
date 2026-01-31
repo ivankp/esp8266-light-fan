@@ -28,7 +28,7 @@ def test_set_get():
     req('set?light=0&fan=0', '{"light":0,"fan":0}')
     req('get', '{"light":0,"fan":0}')
 
-def test_set_get_other_values():
+def test_set_get_bad_values():
     req('set?light=0&fan=0', '{"light":0,"fan":0}')
     req('get', '{"light":0,"fan":0}')
 
