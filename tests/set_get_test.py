@@ -1,81 +1,85 @@
 #!/usr/bin/env python3
 
+from test import Test, TestGroup
 import requests
 
 addr = r'http://192.168.4.1/'
 
-def req(url, expected):
+@Test
+def test(url, expected):
     r = requests.get(addr + url)
     assert r.text == expected
 
+@TestGroup
 def test_set_get():
-    req('set?light=0', '{"light":0}')
-    req('set?fan=0', '{"fan":0}')
-    req('get', '{"light":0,"fan":0}')
+    test('set?light=0', '{"light":0}')
+    test('set?fan=0', '{"fan":0}')
+    test('get', '{"light":0,"fan":0}')
 
-    req('set?light=1', '{"light":1}')
-    req('get', '{"light":1,"fan":0}')
+    test('set?light=1', '{"light":1}')
+    test('get', '{"light":1,"fan":0}')
 
-    req('set?light=0', '{"light":0}')
-    req('get', '{"light":0,"fan":0}')
+    test('set?light=0', '{"light":0}')
+    test('get', '{"light":0,"fan":0}')
 
-    req('set?fan=1', '{"fan":1}')
-    req('get', '{"light":0,"fan":1}')
+    test('set?fan=1', '{"fan":1}')
+    test('get', '{"light":0,"fan":1}')
 
-    req('set?light=1', '{"light":1}')
-    req('get', '{"light":1,"fan":1}')
+    test('set?light=1', '{"light":1}')
+    test('get', '{"light":1,"fan":1}')
 
-    req('set?light=0&fan=0', '{"light":0,"fan":0}')
-    req('get', '{"light":0,"fan":0}')
+    test('set?light=0&fan=0', '{"light":0,"fan":0}')
+    test('get', '{"light":0,"fan":0}')
 
-def test_set_get_bad_values():
-    req('set?light=0&fan=0', '{"light":0,"fan":0}')
-    req('get', '{"light":0,"fan":0}')
+@TestGroup
+def test_set_get_bad():
+    test('set?light=0&fan=0', '{"light":0,"fan":0}')
+    test('get', '{"light":0,"fan":0}')
 
-    req('set?light=0', '{"light":0}')
-    req('get', '{"light":0,"fan":0}')
-    req('set?light=1', '{"light":1}')
-    req('get', '{"light":1,"fan":0}')
-    req('set?light=2', '{}')
-    req('get', '{"light":1,"fan":0}')
-    req('set?light=3', '{}')
-    req('get', '{"light":1,"fan":0}')
-    req('set?light=31', '{}')
-    req('get', '{"light":1,"fan":0}')
-    req('set?light=', '{}')
-    req('get', '{"light":1,"fan":0}')
-    req('set?light=a', '{}')
-    req('get', '{"light":1,"fan":0}')
+    test('set?light=0', '{"light":0}')
+    test('get', '{"light":0,"fan":0}')
+    test('set?light=1', '{"light":1}')
+    test('get', '{"light":1,"fan":0}')
+    test('set?light=2', '{}')
+    test('get', '{"light":1,"fan":0}')
+    test('set?light=3', '{}')
+    test('get', '{"light":1,"fan":0}')
+    test('set?light=31', '{}')
+    test('get', '{"light":1,"fan":0}')
+    test('set?light=', '{}')
+    test('get', '{"light":1,"fan":0}')
+    test('set?light=a', '{}')
+    test('get', '{"light":1,"fan":0}')
 
-    req('set?light=0&fan=0', '{"light":0,"fan":0}')
-    req('get', '{"light":0,"fan":0}')
+    test('set?light=0&fan=0', '{"light":0,"fan":0}')
+    test('get', '{"light":0,"fan":0}')
 
-    req('set?fan=0', '{"fan":0}')
-    req('get', '{"light":0,"fan":0}')
-    req('set?fan=1', '{"fan":1}')
-    req('get', '{"light":0,"fan":1}')
-    req('set?fan=2', '{}')
-    req('get', '{"light":0,"fan":1}')
-    req('set?fan=3', '{}')
-    req('get', '{"light":0,"fan":1}')
-    req('set?fan=31', '{}')
-    req('get', '{"light":0,"fan":1}')
-    req('set?fan=', '{}')
-    req('get', '{"light":0,"fan":1}')
-    req('set?fan=a', '{}')
-    req('get', '{"light":0,"fan":1}')
+    test('set?fan=0', '{"fan":0}')
+    test('get', '{"light":0,"fan":0}')
+    test('set?fan=1', '{"fan":1}')
+    test('get', '{"light":0,"fan":1}')
+    test('set?fan=2', '{}')
+    test('get', '{"light":0,"fan":1}')
+    test('set?fan=3', '{}')
+    test('get', '{"light":0,"fan":1}')
+    test('set?fan=31', '{}')
+    test('get', '{"light":0,"fan":1}')
+    test('set?fan=', '{}')
+    test('get', '{"light":0,"fan":1}')
+    test('set?fan=a', '{}')
+    test('get', '{"light":0,"fan":1}')
 
-    req('set?light=0&fan=0', '{"light":0,"fan":0}')
-    req('get', '{"light":0,"fan":0}')
+    test('set?light=0&fan=0', '{"light":0,"fan":0}')
+    test('get', '{"light":0,"fan":0}')
 
-    req('set?led=1', '{"led":1}')
-    req('set?led=0', '{"led":0}')
-    req('set?led=2', '{}')
-    req('set?led=3', '{}')
-    req('set?led=31', '{}')
-    req('set?led=', '{}')
-    req('set?led=a', '{}')
-    req('set?led=0', '{"led":0}')
+    test('set?led=1', '{"led":1}')
+    test('set?led=0', '{"led":0}')
+    test('set?led=2', '{}')
+    test('set?led=3', '{}')
+    test('set?led=31', '{}')
+    test('set?led=', '{}')
+    test('set?led=a', '{}')
+    test('set?led=0', '{"led":0}')
 
-    req('set?light=0&fan=0', '{"light":0,"fan":0}')
-    req('get', '{"light":0,"fan":0}')
+    test('set?light=0&fan=0', '{"light":0,"fan":0}')
+    test('get', '{"light":0,"fan":0}')

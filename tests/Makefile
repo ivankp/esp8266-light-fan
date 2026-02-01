@@ -1,10 +1,5 @@
-.PHONY: all clean list
+.PHONY: all
 
 all:
-	pytest
-
-list:
-	pytest --collect-only
-
-clean:
-	rm -rf __pycache__ .pytest_cache
+	./page_test.py
+	./set_get_test.py
