@@ -42,6 +42,9 @@ static void switch_timer_callback(void *arg) {
 }
 
 static void init_gpio(void) {
+  // Install the GPIO ISR service
+  gpio_install_isr_service(0);
+
   gpio_config_t io_conf = {
     .mode = GPIO_MODE_OUTPUT,
     .pull_up_en = GPIO_PULLUP_DISABLE,

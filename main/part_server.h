@@ -1,34 +1,5 @@
-// AP = access point
-// STA = station
-// stations connect to access points
-
-// WiFi connection behavior
-// ============================================================================
-// Cause     | N saved | Effect                       | Option | Handler
-// ----------------------------------------------------------------------------
-// Boot up   | N =  0  | AP                           | AP     | init_server
-// Boot up   | N >= 1  | Try first saved, else AP     | ONCE   | start_station
-// Blank req | N =  0  | Error                        | Error  | POST_connect
-// Blank req | N >= 1  | Try each saved once, else AP | ALL    | start_station
-// Req SSID  | N =  0  | Error                        | Error  | POST_connect
-// Req SSID  | N >= 1  | Try once, else prev state    | ONCE   | start_station
-// Req S & P |         | Try once, else prev state    | ONCE   | start_station
-// Disconnect|         | Try first saved a few times  | FIRST  | event handler
-// ----------------------------------------------------------------------------
-
 // TODO: Implement API to return saved SSIDs
 // TODO: Implement disconnect API
-
-// ESP8266_RTOS_SDK/components/esp8266/include/esp_wifi_types.h
-#ifndef MAX_SSID_LEN
-#  error "MAX_SSID_LEN is not defined"
-#endif
-#ifndef MAX_PASSPHRASE_LEN
-#  error "MAX_PASSPHRASE_LEN is not defined"
-#endif
-
-// WiFi standard allows arbitrary SSID and PASS bytes
-// But esp firmware library relies on them being null terminated
 
 // embedded static files
 extern const uint8_t index_page[] asm("_binary_index_html_gz_start");
@@ -121,44 +92,53 @@ send:
   return ESP_OK;
 }
 
-/*
-static TimerHandle_t station_connect_timer = NULL;
+static esp_err_t start_access_point(void);
+static esp_err_t start_station(void);
 
-static void station_connect_timer_callback(void* arg) {
-  xTimerDelete(station_connect_timer, 0);
-  station_connect_timer = NULL;
+static void task_connect(void* arg) {
+  { // save current WiFi mode
+    wifi_mode_t mode = WIFI_MODE_AP;
+    esp_wifi_get_mode(&mode);
+    fallback_wifi_mode_sta = (mode == WIFI_MODE_STA);
+  }
 
-  esp_wifi_deauth_sta(0);
+  // Stop WiFi and free control block
   esp_wifi_stop();
 
-  server_busy = false;
-
-  // TODO: why is this called twice sometimes?
-  TEST("start_station()")
-  if (start_station(ssid) != ESP_OK)
-    start_access_point();
+  if (start_station() != ESP_OK) {
+    if (fallback_wifi_mode_sta) {
+      read_ssid_pass();
+      start_station();
+    } else {
+      start_access_point();
+    }
+  }
 }
-*/
-
-/* static esp_err_t start_access_point(void); */
-/* static esp_err_t start_station(const char* cred); */
 
 static esp_err_t POST_connect(httpd_req_t* req) {
   const char* response = "";
-  char buf[MAX_SSID_LEN+1+MAX_PASSPHRASE_LEN+1];
+  char* ssid = wifi_ssid_pass;
+  char* pass = NULL;
 
   size_t len = req->content_len;
   if (len == 0) { // Empty request
-    // goto connect; // Reconnect using stored credentials
-    response = "Would reconnect";
+    read_ssid_pass();
+    if (*ssid) {
+      pass = memchr(ssid, '\0', MAX_SSID_LEN+1);
+      if (!pass)
+        goto server_error;
+      ++pass;
+      goto connect; // Reconnect using stored credentials
+    }
+    response = "No saved SSID";
     goto bad_request;
-  } else if (len > sizeof(buf)) { // Request is too long
+  } else if (len > sizeof(wifi_ssid_pass)) { // Request is too long
     response = "Invalid SSID or PASS";
     goto bad_request;
   }
 
   // Read SSID and PASS data from request
-  for (char *p = buf; len; ) {
+  for (char *p = ssid; len; ) {
     const int ret = httpd_req_recv(req, p, len);
     if (ret <= 0) {
       // If an error is returned, the URI handler must further return an error.
@@ -174,15 +154,15 @@ static esp_err_t POST_connect(httpd_req_t* req) {
   len = req->content_len;
 
   // Validate SSID
-  char* pass = memchr(buf, '\0', MIN(len, MAX_SSID_LEN+1));
-  if (pass < buf + 1) { // PASS must be at least 1 byte long
+  pass = memchr(ssid, '\0', MIN(len, MAX_SSID_LEN+1));
+  if (pass < ssid + 1) { // SSID must be at least 1 byte long
     response = "Invalid SSID";
     goto bad_request;
   }
   ++pass; // move past null byte
 
   // Validate PASS
-  len -= pass - buf;
+  len -= pass - ssid;
   if (len == 0) { // no PASS in request
     *pass = '\0';
     len = 1;
@@ -191,46 +171,19 @@ static esp_err_t POST_connect(httpd_req_t* req) {
     goto bad_request;
   }
 
-// connect:
+connect:
+  // TODO: task doesn't work
+  if (xTaskCreate(task_connect, NULL, 256, NULL, 1, NULL) != pdPASS)
+    goto server_error;
+
   {
 #define PREFIX "Connecting to "
     char response[sizeof(PREFIX) + MAX_SSID_LEN] = PREFIX;
-    char* end = mempcpy(response + sizeof(PREFIX) - 1, buf, pass - buf - 1);
+    char* end = mempcpy(response + sizeof(PREFIX) - 1, ssid, pass - ssid - 1);
 #undef PREFIX
     httpd_resp_set_type(req, "text/plain; charset=utf-8");
     httpd_resp_send(req, response, end - response);
   }
-  // // TODO: httpd_resp_send() returns too fast
-  // // client appears to not receive before esp_wifi_stop()
-
-  // { // save current WiFi mode
-  //   wifi_mode_t mode = WIFI_MODE_AP;
-  //   esp_wifi_get_mode(&mode);
-  //   global_flags.prev_mode_ap = (mode != WIFI_MODE_STA);
-  // }
-
-  // global_flags.manual_disconnect = !global_flags.prev_mode_ap;
-
-  // // if (!station_connect_timer) {
-  // //   station_connect_timer = xTimerCreate/*Static*/(
-  // //     "",
-  // //     2000 / portTICK_PERIOD_MS, // period in ticks
-  // //     pdFALSE, // not periodic
-  // //     (void*) 0, // timer id
-  // //     station_connect_timer_callback
-  // //   );
-  // // }
-  // // xTimerStart(station_connect_timer, 0);
-
-  // sleep(2); // delay to allow current requests to finish
-
-  // esp_wifi_deauth_sta(0);
-  // esp_wifi_stop();
-
-  // // TODO: why is this called twice sometimes?
-  // TEST("start_station()")
-  // if (start_station(ssid) != ESP_OK)
-  //   start_access_point();
 
   return ESP_OK;
 

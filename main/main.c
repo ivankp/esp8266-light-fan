@@ -29,9 +29,8 @@
 #define AP_PASS "automation"
 #define MAX_CONN 4
 
-// #define MAX_CRED 8
 #define MAX_STATION_ATTEMPTS 2
-#define MAX_STATION_DELAYED_ATTEMPTS 8
+#define MAX_STATION_ATTEMPTS_DELAYED 8
 
 // Helpers ==========================================================
 
@@ -40,11 +39,17 @@
 
 // #define FIELD_SIZE(t,f) (sizeof(((t*)0)->f))
 
-// #define TEST(str, ...)
-//   printf(STR(__LINE__) ": " str "\n", ##__VA_ARGS__);
+#define ENABLE_TEST
+#ifndef ENABLE_TEST
+#define TEST(...)
+#else
+#define TEST(str, ...) printf( \
+  "\033[33m" STR(__LINE__) "\033[0m: " \
+  STR((__VA_ARGS__)) ": " \
+  str "\n", ##__VA_ARGS__);
+#endif
 
 #define CHECK_OK_DEBUG
-
 #ifndef CHECK_OK_DEBUG
 #define CHECK_OK(x) \
   if ((x) != ESP_OK) { goto err; }
@@ -68,8 +73,24 @@
 
 // ==================================================================
 
+// ESP8266_RTOS_SDK/components/esp8266/include/esp_wifi_types.h
+// WiFi standard allows arbitrary SSID and PASS bytes
+// But esp firmware library relies on them being null terminated
+#ifndef MAX_SSID_LEN
+#  error "MAX_SSID_LEN is not defined"
+#endif
+#ifndef MAX_PASSPHRASE_LEN
+#  error "MAX_PASSPHRASE_LEN is not defined"
+#endif
+
+bool fallback_wifi_mode_sta = false;
+bool manual_disconnect = false;
+char wifi_ssid_pass[MAX_SSID_LEN+1+MAX_PASSPHRASE_LEN+1];
+
+// ==================================================================
+
 #include "part_gpio.h"
-// #include "part_nvs.h"
+#include "part_nvs.h"
 #include "part_server.h"
 #include "part_wifi.h"
 
