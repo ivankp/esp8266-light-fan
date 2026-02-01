@@ -43,6 +43,7 @@ extern const uint8_t index_page_end[] asm("_binary_index_html_gz_end");
 // =============================================================================
 
 static esp_err_t GET_(httpd_req_t* req) {
+  httpd_resp_set_type(req, "text/html; charset=utf-8");
   httpd_resp_set_hdr(req,"Content-Encoding","gzip");
   httpd_resp_send(req, (const char*) index_page, index_page_end - index_page);
   return ESP_OK;
@@ -196,6 +197,7 @@ static esp_err_t POST_connect(httpd_req_t* req) {
     char response[sizeof(PREFIX) + MAX_SSID_LEN] = PREFIX;
     char* end = mempcpy(response + sizeof(PREFIX) - 1, buf, pass - buf - 1);
 #undef PREFIX
+    httpd_resp_set_type(req, "text/plain; charset=utf-8");
     httpd_resp_send(req, response, end - response);
   }
   // // TODO: httpd_resp_send() returns too fast
@@ -234,6 +236,7 @@ static esp_err_t POST_connect(httpd_req_t* req) {
 
 bad_request:
   httpd_resp_set_status(req, HTTPD_400);
+  httpd_resp_set_type(req, "text/plain; charset=utf-8");
   return httpd_resp_send(req, response, strlen(response));
 
 server_error:
