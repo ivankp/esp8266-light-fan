@@ -7,8 +7,9 @@ addr = r'http://192.168.4.1/'
 
 @Test
 def test(url, expected):
-    r = requests.get(addr + url)
-    assert r.text == expected
+    resp = requests.get(addr + url)
+    assert resp.status_code == 200
+    assert resp.text == expected
 
 @TestGroup
 def test_set_get():
