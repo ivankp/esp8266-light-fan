@@ -10,8 +10,6 @@
 
 // =============================================================================
 
-static TimerHandle_t station_reconnect_timer = NULL;
-
 static void station_reconnect_timer_callback(void* arg) {
   esp_wifi_connect();
 }
@@ -22,9 +20,12 @@ static void station_event_handler(
   int32_t event_id,
   void* event_data
 ) {
-  TEST("%s %d", event_base, event_id)
+  static TimerHandle_t station_reconnect_timer;
   static uint8_t attempt = 0;
   static uint8_t delayed_attempt = 0;
+
+  TEST("%s %d", event_base, event_id)
+
   if (event_base == WIFI_EVENT) {
     if (event_id == WIFI_EVENT_STA_START) {
       attempt = 0;
@@ -99,7 +100,7 @@ static esp_err_t start_station(void) {
   if (!pass) goto err;
   const uint8_t ssid_len = pass - ssid;
   ++pass;
-  const char* end = memchr(ssid, '\0', MAX_PASSPHRASE_LEN+1);
+  const char* end = memchr(pass, '\0', MAX_PASSPHRASE_LEN+1);
   if (!end) goto err;
   const uint8_t pass_len = end - pass;
 

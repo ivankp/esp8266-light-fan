@@ -172,7 +172,7 @@ static esp_err_t POST_connect(httpd_req_t* req) {
   }
 
 connect:
-  // TODO: task doesn't work
+  // TODO: use a timer instead
   if (xTaskCreate(task_connect, NULL, 256, NULL, 1, NULL) != pdPASS)
     goto server_error;
 
