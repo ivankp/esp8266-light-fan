@@ -120,16 +120,9 @@ static void connect_timer_callback(void* arg) {
   // Stop WiFi and free control block
   esp_wifi_stop();
 
-  // TODO: does this fail synchronously,
-  // or do I need to handle this in the event callback?
-  if (start_station() != ESP_OK) {
-    if (fallback_wifi_mode_sta) {
-      read_ssid_pass();
-      start_station();
-    } else {
-      start_access_point();
-    }
-  }
+  // Connect as a station to an access point
+  start_station();
+  // Connection failure is handled in station_event_handler()
 }
 
 static esp_err_t POST_connect(httpd_req_t* req) {
@@ -189,7 +182,6 @@ static esp_err_t POST_connect(httpd_req_t* req) {
   }
 
 connect:
-  // TODO: use a timer instead
   connect_timer = xTimerCreate(
     NULL,
     2000 / portTICK_PERIOD_MS, // period in ticks

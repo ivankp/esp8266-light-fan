@@ -24,10 +24,12 @@
 // err: ;
 // }
 
+// TODO: return fail code
 static void read_ssid_pass(void) {
   // zero-out the buffer
   memset(wifi_ssid_pass, 0, sizeof(wifi_ssid_pass));
 }
 
+// TODO: return fail code
 static void write_ssid_pass(void) {
 }
