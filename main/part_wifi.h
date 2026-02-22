@@ -40,15 +40,21 @@ static void station_event_handler(
       }
       if (attempt < MAX_STATION_ATTEMPTS) {
         ++attempt;
+#ifndef NDEBUG
         puts("Retrying AP connection");
+#endif
         esp_wifi_connect();
         // WIFI_EVENT_STA_DISCONNECTED is triggered if esp_wifi_connect() fails
       } else { // try to connect after a delay
         attempt = 0;
+#ifndef NDEBUG
         puts("AP connection failed");
+#endif
         if (delayed_attempt < MAX_STATION_ATTEMPTS_DELAYED) {
           ++delayed_attempt;
+#ifndef NDEBUG
           puts("Attempting to reconnect in 1 minute");
+#endif
           if (!station_reconnect_timer) {
             station_reconnect_timer = xTimerCreate/*Static*/(
               NULL,
@@ -82,9 +88,11 @@ static void station_event_handler(
       attempt = 0;
       delayed_attempt = 0;
 
+#ifndef NDEBUG
       ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
       puts("Station IP address:");
       puts(ip4addr_ntoa(&event->ip_info.ip));
+#endif
 
       fallback_wifi_mode_sta = true;
       write_ssid_pass();
@@ -136,11 +144,13 @@ static esp_err_t start_access_point(void) {
   CHECK_OK(esp_wifi_set_config(ESP_IF_WIFI_AP, &wifi_config));
   CHECK_OK(esp_wifi_start());
 
+#ifndef NDEBUG
   tcpip_adapter_ip_info_t ip_info;
   tcpip_adapter_get_ip_info(TCPIP_ADAPTER_IF_AP, &ip_info);
 
   puts("Access point IP address:");
   puts(ip4addr_ntoa(&ip_info.ip));
+#endif
 
   return ESP_OK;
 

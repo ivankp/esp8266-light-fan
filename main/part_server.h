@@ -5,16 +5,19 @@
 extern const uint8_t index_page[] asm("_binary_index_html_gz_start");
 extern const uint8_t index_page_end[] asm("_binary_index_html_gz_end");
 
+#define UTF8_TEXT "text/html; charset=utf-8"
+
 #define HTTP_PAGES \
   X(GET, ) \
   X(GET, get) \
   X(GET, set) \
+  X(GET, ssid) \
   X(POST, connect) \
 
 // =============================================================================
 
 static esp_err_t GET_(httpd_req_t* req) {
-  httpd_resp_set_type(req, "text/html; charset=utf-8");
+  httpd_resp_set_type(req, UTF8_TEXT);
   httpd_resp_set_hdr(req,"Content-Encoding","gzip");
   httpd_resp_send(req, (const char*) index_page, index_page_end - index_page);
   return ESP_OK;
@@ -89,6 +92,16 @@ send:
   httpd_resp_set_type(req, HTTPD_TYPE_JSON);
   httpd_resp_send(req, buf, buf_ptr - buf);
 
+  return ESP_OK;
+}
+
+static esp_err_t GET_ssid(httpd_req_t* req) {
+  const char* const ssid = wifi_ssid_pass; // always points to SSID\0PASS\0
+  const char* pass = memchr(ssid, '\0', MAX_SSID_LEN+1);
+  const uint8_t ssid_len = pass ? pass - ssid : 0;
+
+  httpd_resp_set_type(req, HTTPD_TYPE_OCTET);
+  httpd_resp_send(req, ssid, ssid_len);
   return ESP_OK;
 }
 
@@ -192,7 +205,7 @@ connect:
     char response[sizeof(PREFIX) + MAX_SSID_LEN] = PREFIX;
     char* end = mempcpy(response + sizeof(PREFIX) - 1, ssid, pass - ssid - 1);
 #undef PREFIX
-    httpd_resp_set_type(req, "text/plain; charset=utf-8");
+    httpd_resp_set_type(req, UTF8_TEXT);
     httpd_resp_send(req, response, end - response);
   }
 
@@ -200,7 +213,7 @@ connect:
 
 bad_request:
   httpd_resp_set_status(req, HTTPD_400);
-  httpd_resp_set_type(req, "text/plain; charset=utf-8");
+  httpd_resp_set_type(req, UTF8_TEXT);
   return httpd_resp_send(req, response, strlen(response));
 
 server_error:
