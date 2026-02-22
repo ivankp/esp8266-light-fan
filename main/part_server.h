@@ -95,7 +95,9 @@ send:
 static esp_err_t start_access_point(void);
 static esp_err_t start_station(void);
 
-static void task_connect(void* arg) {
+static TimerHandle_t connect_timer;
+
+static void connect_timer_callback(void* arg) {
   { // save current WiFi mode
     wifi_mode_t mode = WIFI_MODE_AP;
     esp_wifi_get_mode(&mode);
@@ -105,6 +107,8 @@ static void task_connect(void* arg) {
   // Stop WiFi and free control block
   esp_wifi_stop();
 
+  // TODO: does this fail synchronously,
+  // or do I need to handle this in the event callback?
   if (start_station() != ESP_OK) {
     if (fallback_wifi_mode_sta) {
       read_ssid_pass();
@@ -173,7 +177,14 @@ static esp_err_t POST_connect(httpd_req_t* req) {
 
 connect:
   // TODO: use a timer instead
-  if (xTaskCreate(task_connect, NULL, 256, NULL, 1, NULL) != pdPASS)
+  connect_timer = xTimerCreate(
+    NULL,
+    2000 / portTICK_PERIOD_MS, // period in ticks
+    pdFALSE, // not periodic
+    (void*) 0, // timer id
+    station_reconnect_timer_callback
+  );
+  if (!connect_timer || xTimerStart(connect_timer, 0) != pdPASS)
     goto server_error;
 
   {

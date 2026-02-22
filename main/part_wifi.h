@@ -42,8 +42,7 @@ static void station_event_handler(
         ++attempt;
         puts("Retrying AP connection");
         esp_wifi_connect();
-        // WIFI_EVENT_STA_DISCONNECTED is triggered by esp_wifi_connect()
-        // if it fails
+        // WIFI_EVENT_STA_DISCONNECTED is triggered if esp_wifi_connect() fails
       } else { // try to connect after a delay
         attempt = 0;
         puts("AP connection failed");

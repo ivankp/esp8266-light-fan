@@ -2,6 +2,7 @@
 // https://docs.espressif.com/projects/esp8266-rtos-sdk/en/latest/
 
 #include <string.h>
+#include <stdint.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/timers.h"
@@ -79,13 +80,19 @@
 #ifndef MAX_SSID_LEN
 #  error "MAX_SSID_LEN is not defined"
 #endif
+#if MAX_SSID_LEN >= UINT8_MAX
+#  error "MAX_SSID_LEN >= " STR(UINT8_MAX)
+#endif
 #ifndef MAX_PASSPHRASE_LEN
 #  error "MAX_PASSPHRASE_LEN is not defined"
 #endif
+#if MAX_PASSPHRASE_LEN >= UINT8_MAX
+#  error "MAX_PASSPHRASE_LEN >= " STR(UINT8_MAX)
+#endif
 
+char wifi_ssid_pass[MAX_SSID_LEN+1+MAX_PASSPHRASE_LEN+1];
 bool fallback_wifi_mode_sta = false;
 bool manual_disconnect = false;
-char wifi_ssid_pass[MAX_SSID_LEN+1+MAX_PASSPHRASE_LEN+1];
 
 // ==================================================================
 
